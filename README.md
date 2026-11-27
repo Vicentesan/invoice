@@ -73,21 +73,41 @@ previewed with pdf.js.
   tests.
 - PDF rendering is a `PdfRenderer` service that fails with a typed `PdfRenderError`.
 
+## Command line
+
+The same rendering runs from a terminal. `invoice` reads an invoice as JSON, the format the web app exports, and
+writes the PDF:
+
+```sh
+bun run cli sample -o invoice.json           # a made-up invoice to start from
+bun run cli render invoice.json              # writes invoice-<number>.pdf
+bun run cli render invoice.json -o out.pdf --page-size Letter
+```
+
+`render` validates the file with the same Schema as the web app and says what is wrong when it doesn't pass.
+`sample --seed <n>` always gives the same invoice for the same seed.
+
 ## Development
 
-The repository is a Bun workspace. The app lives in `apps/web`; linting, formatting, type checking and the test
-runner are set up once at the root.
+The repository is a Bun workspace:
+
+- `apps/web`: the web app.
+- `apps/cli`: the `invoice` command.
+- `packages/shared`: the invoice model, the money and date math, and the PDF rendering, used by both.
+
+Linting, formatting, type checking and the test runner are set up once at the root.
 
 ```sh
 bun install
-bun run dev      # start the app
+bun run dev      # start the web app
 bun run build    # production build in apps/web/dist/
+bun run cli      # run the command-line tool
 bun run check    # format check, lint, typecheck and tests
 ```
 
 The tests cover the money math, the due-date presets and month-end clamping, Schema round-trips, the editor's update
-logic, and the PDF: they extract the text of a generated file and assert that the IBAN, SWIFT code and total appear
-exactly.
+logic, the CLI, and the PDF: they extract the text of a generated file and assert that the IBAN, SWIFT code and total
+appear exactly.
 
 ## Deploy
 
@@ -105,5 +125,5 @@ workers.dev URL. The `vicente.fyi` zone must already exist in the Cloudflare acc
 
 ## License
 
-MIT. Inter is distributed under the SIL Open Font License; see `apps/web/src/assets/fonts/OFL.txt`. The lint rules under
+MIT. Inter is distributed under the SIL Open Font License; see `packages/shared/src/assets/fonts/OFL.txt`. The lint rules under
 `tools/oxlint` carry their own license files.
