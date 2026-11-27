@@ -75,10 +75,13 @@ previewed with pdf.js.
 
 ## Development
 
+The repository is a Bun workspace. The app lives in `apps/web`; linting, formatting, type checking and the test
+runner are set up once at the root.
+
 ```sh
 bun install
 bun run dev      # start the app
-bun run build    # production build in dist/
+bun run build    # production build in apps/web/dist/
 bun run check    # format check, lint, typecheck and tests
 ```
 
@@ -97,10 +100,10 @@ bun run deploy:plan                          # preview the changes
 bun run deploy                               # deploy the prod stage to invoices.vicente.fyi
 ```
 
-Only the `prod` stage attaches the `invoices.vicente.fyi` domain; any other stage (`bunx alchemy deploy`) stays on a
+The stack is `apps/web/alchemy.run.ts`. Only the `prod` stage attaches the `invoices.vicente.fyi` domain; any other stage (`bunx alchemy deploy`) stays on a
 workers.dev URL. The `vicente.fyi` zone must already exist in the Cloudflare account.
 
 ## License
 
-MIT. Inter is distributed under the SIL Open Font License; see `src/assets/fonts/OFL.txt`. The lint rules under
+MIT. Inter is distributed under the SIL Open Font License; see `apps/web/src/assets/fonts/OFL.txt`. The lint rules under
 `tools/oxlint` carry their own license files.
