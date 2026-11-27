@@ -5,15 +5,15 @@
   "license": "MIT",
   "type": "module",
   "packageManager": "bun@1.4.5",
-  "imports": {
-    "#domain/*": "./src/domain/*.ts"
-  },
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "deploy": "alchemy deploy --stage prod",
-    "deploy:plan": "alchemy plan --stage prod",
+    "dev": "bun run --filter @invoice/web dev",
+    "build": "bun run --filter @invoice/web build",
+    "preview": "bun run --filter @invoice/web preview",
+    "deploy": "bun run --filter @invoice/web deploy",
+    "deploy:plan": "bun run --filter @invoice/web deploy:plan",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run test",
     "format": "dprint fmt",
     "format:check": "dprint check",
@@ -22,32 +22,14 @@
     "test": "vitest run",
     "typecheck": "effect-tsgo patch && tsc --noEmit -p tsconfig.json"
   },
-  "dependencies": {
-    "@effect/ui": "https://pkg.pr.new/Effect-TS/ui/@effect/ui@22128c65",
-    "@effect/ui-kit": "https://pkg.pr.new/Effect-TS/ui/@effect/ui-kit@22128c65",
-    "@fontsource-variable/inter": "5.3.0",
-    "@hugeicons/core-free-icons": "^4.4.0",
-    "@pdf-lib/fontkit": "1.1.1",
-    "effect": "4.1.7",
-    "pdf-lib": "1.17.1",
-    "pdfjs-dist": "6.5.438"
-  },
   "devDependencies": {
-    "@alchemy.run/cloudflare": "2.0.0-beta.87",
-    "@effect/platform-bun": "4.1.7",
-    "@effect/platform-node": "4.1.7",
     "@effect/tsgo": "0.73.7",
-    "@effect/vitest": "4.1.7",
     "@oxlint/plugins": "1.95.0",
-    "@tailwindcss/vite": "4.3.5",
     "@types/bun": "1.4.5",
-    "alchemy": "2.0.0-beta.87",
     "dprint": "0.65.0",
     "oxlint": "1.95.0",
     "oxlint-tsgolint": "7.0.2009",
-    "tailwindcss": "4.3.5",
     "typescript": "7.0.2",
-    "vite": "8.4.0",
     "vitest": "5.1.2"
   }
 }

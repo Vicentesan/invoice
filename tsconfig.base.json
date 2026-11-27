@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "allowJs": false,
+    "erasableSyntaxOnly": true,
+    "exactOptionalPropertyTypes": true,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "noErrorTruncation": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ESNext",
+    "types": ["bun"],
+    "verbatimModuleSyntax": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "includeSuggestionsInTsc": false,
+        "namespaceImportPackages": ["effect"],
+        "diagnosticSeverity": {
+          "experimentalApiUsage": "off"
+        },
+        "overrides": [
+          {
+            "include": ["**/src/**/*.ts"],
+            "options": {
+              "diagnosticSeverity": {
+                "floatingEffect": "error"
+              }
+            }
+          },
+          {
+            "include": ["**/*.test.ts"],
+            "options": {
+              "allowedUnstableApis": ["@effect/vitest"]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -4,6 +4,20 @@
   "workspaces": {
     "": {
       "name": "invoice",
+      "devDependencies": {
+        "@effect/tsgo": "0.73.7",
+        "@oxlint/plugins": "1.95.0",
+        "@types/bun": "1.4.5",
+        "dprint": "0.65.0",
+        "oxlint": "1.95.0",
+        "oxlint-tsgolint": "7.0.2009",
+        "typescript": "7.0.2",
+        "vitest": "5.1.2",
+      },
+    },
+    "apps/web": {
+      "name": "@invoice/web",
+      "version": "0.0.0",
       "dependencies": {
         "@effect/ui": "https://pkg.pr.new/Effect-TS/ui/@effect/ui@22128c65",
         "@effect/ui-kit": "https://pkg.pr.new/Effect-TS/ui/@effect/ui-kit@22128c65",
@@ -18,17 +32,10 @@
         "@alchemy.run/cloudflare": "2.0.0-beta.87",
         "@effect/platform-bun": "4.1.7",
         "@effect/platform-node": "4.1.7",
-        "@effect/tsgo": "0.73.7",
         "@effect/vitest": "4.1.7",
-        "@oxlint/plugins": "1.95.0",
         "@tailwindcss/vite": "4.3.5",
-        "@types/bun": "1.4.5",
         "alchemy": "2.0.0-beta.87",
-        "dprint": "0.65.0",
-        "oxlint": "1.95.0",
-        "oxlint-tsgolint": "7.0.2009",
         "tailwindcss": "4.3.5",
-        "typescript": "7.0.2",
         "vite": "8.4.0",
         "vitest": "5.1.2",
       },
@@ -204,6 +211,8 @@
     "@img/sharp-win32-ia32": ["@img/sharp-win32-ia32@0.35.5", "", { "os": "win32", "cpu": "ia32" }, "sha512-5Zm82LoBc43nhwNybZlG7Y1KO//Zhsn306fQl29ZOuStHLGTo3BWL83q3cznX0poxSAMuYL1On/BHBxkBeKr6A=="],
 
     "@img/sharp-win32-x64": ["@img/sharp-win32-x64@0.35.5", "", { "os": "win32", "cpu": "x64" }, "sha512-x76eH0vEiHlcMQu8Y8IenntaACtddpT6W0wmXtWrnKcnKI7ME5DdgqhAD6SEWOEl1v2zDvkZDhFA9KnURwpfqg=="],
+
+    "@invoice/web": ["@invoice/web@workspace:apps/web"],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 
