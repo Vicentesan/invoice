@@ -28,6 +28,32 @@ const initialInvoice: Invoice.Invoice = {
 const props = { initialInvoice, initialNotice: null, today: "2026-02-10" }
 
 describe("InvoiceEditor", () => {
+  it.effect("steps the preview's zoom between its limits and re-centers at 100%", () =>
+    Effect.gen(function*() {
+      const s = yield* Story.make(InvoiceEditorNoDeps, props)
+
+      expect(s.model.zoom).toBe(1)
+
+      s.send(InvoiceEditorMessage.ClickedZoomIn())
+      expect(s.model.zoom).toBe(1.25)
+
+      // A pinch stops between two steps; the buttons go on to the nearest step either way.
+      s.send(InvoiceEditorMessage.PinchedPreview({ zoom: 1.6 }))
+      expect(s.model.zoom).toBe(1.6)
+      s.send(InvoiceEditorMessage.ClickedZoomIn())
+      expect(s.model.zoom).toBe(2)
+      s.send(InvoiceEditorMessage.PinchedPreview({ zoom: 1.6 })).send(InvoiceEditorMessage.ClickedZoomOut())
+      expect(s.model.zoom).toBe(1.5)
+
+      s.send(InvoiceEditorMessage.PinchedPreview({ zoom: 9 })).send(InvoiceEditorMessage.ClickedZoomIn())
+      expect(s.model.zoom).toBe(4)
+      s.send(InvoiceEditorMessage.PinchedPreview({ zoom: 0.1 })).send(InvoiceEditorMessage.ClickedZoomOut())
+      expect(s.model.zoom).toBe(0.5)
+
+      s.send(InvoiceEditorMessage.ClickedRecenter())
+      expect(s.model.zoom).toBe(1)
+    }))
+
   it.effect("turns a typed unit price into minor units as it parses", () =>
     Effect.gen(function*() {
       const s = yield* Story.make(InvoiceEditorNoDeps, props)
@@ -138,11 +164,17 @@ describe("InvoiceEditor", () => {
     Effect.gen(function*() {
       const s = yield* Story.make(InvoiceEditorNoDeps, props)
 
-      s.send(InvoiceEditorMessage.UpdatedCurrency({ value: "jp" }))
+      // The picker opens with an empty search, and something that isn't a currency code changes nothing.
+      s.send(InvoiceEditorMessage.UpdatedCurrencySearch({ value: "yen" }))
+        .send(InvoiceEditorMessage.RequestedOpenPopup({ popup: "currency" }))
+      expect(s.model.currencySearch).toBe("")
+      s.send(InvoiceEditorMessage.PickedCurrency({ value: "null" }))
       expect(s.model.invoice.currency).toBe("USD")
+      expect(s.model.popup).toBe("currency")
 
-      s.send(InvoiceEditorMessage.UpdatedCurrency({ value: "jpy" }))
+      s.send(InvoiceEditorMessage.PickedCurrency({ value: "JPY" }))
       expect(s.model.invoice.currency).toBe("JPY")
+      expect(s.model.popup).toBeNull()
       expect(s.model.invoice.items.map((item) => item.unitPrice)).toEqual([1500, 50])
     }))
 

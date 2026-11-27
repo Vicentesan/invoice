@@ -1,5 +1,5 @@
 import { Command, Component, Mount, Subscription, UiSchema } from "@effect/ui"
-import { DatePicker, FileDrop, Select } from "@effect/ui-kit"
+import { Combobox, DatePicker, FileDrop, Select } from "@effect/ui-kit"
 import { Html, HtmlFiles, HtmlSubscription } from "@effect/ui/html"
 import * as Decimal from "@invoice/shared/domain/Decimal"
 import * as Invoice from "@invoice/shared/domain/Invoice"
@@ -26,7 +26,10 @@ import {
   ImportIcon,
   PageIcon,
   PlusIcon,
-  UploadIcon
+  RecenterIcon,
+  UploadIcon,
+  ZoomInIcon,
+  ZoomOutIcon
 } from "../../components/Icon.ts"
 import { layer as bundledFonts } from "../services/InvoiceFontsBundled.ts"
 import { InvoiceStore } from "../services/InvoiceStore.ts"
@@ -38,7 +41,7 @@ const PartyField = Schema.Literals(["name", "country", "taxIdLabel", "taxId"])
 const DateField = Schema.Literals(["issueDate", "dueDate"])
 
 /** The popups of the form. One is open at a time. */
-const Popup = Schema.Literals(["dueTerms", "issueDate", "dueDate", "paymentLabels", "pageSize"])
+const Popup = Schema.Literals(["dueTerms", "issueDate", "dueDate", "currency", "paymentLabels", "pageSize"])
 
 /** The dialogs of the page. One is open at a time. */
 const Dialog = Schema.Literals(["import", "export"])
@@ -62,7 +65,8 @@ export const InvoiceEditorMessage = UiSchema.TaggedEnum({
   PickedDueTerms: { value: Schema.String },
   PickedDate: { field: DateField, date: Schema.NullOr(Schema.DateTimeUtc) },
   RequestedCalendarMonth: { month: Schema.DateTimeUtc },
-  UpdatedCurrency: { value: Schema.String },
+  PickedCurrency: { value: Schema.String },
+  UpdatedCurrencySearch: { value: Schema.String },
   UpdatedItemDescription: { index: Schema.Number, value: Schema.String },
   UpdatedItemQuantity: { index: Schema.Number, value: Schema.String },
   UpdatedItemUnitPrice: { index: Schema.Number, value: Schema.String },
@@ -106,6 +110,10 @@ export const InvoiceEditorMessage = UiSchema.TaggedEnum({
   SucceededSaveInvoice: { edits: Schema.Number },
   FailedSaveInvoice: { reason: Schema.String },
   ChangedPreview: { preview: Preview },
+  ClickedZoomIn: {},
+  ClickedZoomOut: {},
+  ClickedRecenter: {},
+  PinchedPreview: { zoom: Schema.Number },
   ClickedDismissNotice: {}
 })
 
@@ -121,6 +129,8 @@ export const InvoiceEditorModel = Schema.Struct({
   draft: Schema.NullOr(Schema.Struct({ field: Schema.String, text: Schema.String, valid: Schema.Boolean })),
   /** The popup that is open, if any. */
   popup: Schema.NullOr(Popup),
+  /** What has been typed into the currency picker's search box. */
+  currencySearch: Schema.String,
   /** The month the open calendar shows. */
   calendarMonth: Schema.DateTimeUtc,
   /** Counts changes to the invoice. The autosave is keyed on it. */
@@ -128,6 +138,8 @@ export const InvoiceEditorModel = Schema.Struct({
   /** The value of `edits` that the last successful save wrote. */
   savedEdits: Schema.Number,
   preview: Preview,
+  /** How far the preview is zoomed on a wide screen: 1 fits the page to the pane. */
+  zoom: Schema.Number,
   notice: Schema.NullOr(Schema.String),
   /**
    * Demo mode. While it is on the invoice on screen is sample data, nothing
@@ -264,6 +276,9 @@ export const ReadImport = Command.make(
 // How long the page-size switch takes to slide. It matches the transition in styles.css.
 const SWITCH_SLIDE = "200 millis"
 
+// How long a zoom waits before the pages are painted at their new size, so a pinch isn't repainted at every step.
+const ZOOM_SETTLE = "120 millis"
+
 const drawPreview = Effect.fn("drawPreview")(function*(node: HTMLElement, invoice: Invoice.Invoice) {
   const renderer = yield* PdfRenderer
   const canvas = yield* PdfCanvas
@@ -295,7 +310,9 @@ const viewportChanges = (node: HTMLElement): Stream.Stream<void> => {
 
 /**
  * Renders the invoice to a PDF and paints its pages into the element, at once
- * and again on every change to the invoice or the viewport. Renders never
+ * and again on every change to the invoice, the zoom or the viewport. The
+ * pages are painted at the element's width, which `ZoomPreview` has changed
+ * by the time a zoom has settled. Renders never
  * overlap: changes that arrive while one is running collapse into the latest,
  * which is rendered next, so the preview keeps up with typing without a wait
  * before it starts. What is on screen is the PDF itself, the same bytes a
@@ -303,24 +320,150 @@ const viewportChanges = (node: HTMLElement): Stream.Stream<void> => {
  */
 export const DrawPreview = Mount.makeStream(
   "DrawPreview",
-  { args: { invoice: Invoice.Invoice } },
+  { args: { invoice: Invoice.Invoice, zoom: Schema.Number } },
   (node: HTMLElement, _args, changes) => {
     let pageSize: Invoice.PageSize | undefined
+    let painted: number | undefined
 
     return changes.pipe(
       Stream.zipLatest(Stream.concat(Stream.succeed(undefined), viewportChanges(node))),
       Stream.buffer({ capacity: 1, strategy: "sliding" }),
-      Stream.mapEffect(([{ invoice }]) => {
+      Stream.mapEffect(([{ invoice, zoom }]) => {
         // A new page size comes from the switch, whose thumb gets to finish its slide first.
         const settle = pageSize !== undefined && pageSize !== invoice.pageSize
           ? Effect.sleep(SWITCH_SLIDE)
+          : painted !== undefined && painted !== zoom
+          ? Effect.sleep(ZOOM_SETTLE)
           : Effect.void
 
         pageSize = invoice.pageSize
+        painted = zoom
 
         return Effect.andThen(settle, drawPreview(node, invoice))
       })
     )
+  }
+)
+
+/** The zoom levels the buttons step through. A pinch can stop anywhere between the first and the last. */
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+const MIN_ZOOM = 0.5
+const MAX_ZOOM = 4
+
+const clampZoom = (zoom: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
+
+const zoomedIn = (zoom: number): number => ZOOM_STEPS.find((step) => step > zoom + 0.001) ?? MAX_ZOOM
+
+const zoomedOut = (zoom: number): number => ZOOM_STEPS.findLast((step) => step < zoom - 0.001) ?? MIN_ZOOM
+
+// The preview only scrolls on its own, and so only zooms, at the `lg` breakpoint and up.
+const WIDE_SCREEN = "(min-width: 64rem)"
+
+/**
+ * Zooms and pans the preview on a wide screen. The element is the scroller;
+ * its `--zoom` sets the width of the sheet inside it (see styles.css), and the
+ * scroll position pans, over the `data-pan` area. A zoom keeps one point of the sheet where it is on
+ * screen: the pointer for a pinch on a trackpad or a wheel turned with Ctrl or
+ * Cmd held, and the middle of the pane for the buttons. Dragging with a mouse
+ * pans. A pinch is applied here at once and then emitted, so the Model learns
+ * the zoom the element already has.
+ */
+export const ZoomPreview = Mount.makeStream(
+  "ZoomPreview",
+  { args: { zoom: Schema.Number } },
+  (node: HTMLElement, _args, changes) => {
+    const view = node.ownerDocument.defaultView
+    let applied = 1
+
+    const isWide = (): boolean => view !== null && view.matchMedia(WIDE_SCREEN).matches
+
+    const apply = (zoom: number, clientX: number, clientY: number): void => {
+      const sheet = node.querySelector<HTMLElement>("[data-sheet]")
+
+      applied = zoom
+
+      if (sheet === null) {
+        node.style.setProperty("--zoom", String(zoom))
+
+        return
+      }
+
+      // Where the anchor sits on the sheet, as a fraction of its size, before and after.
+      const before = sheet.getBoundingClientRect()
+      const x = before.width === 0 ? 0.5 : (clientX - before.left) / before.width
+      const y = before.height === 0 ? 0 : (clientY - before.top) / before.height
+
+      node.style.setProperty("--zoom", String(zoom))
+
+      const after = sheet.getBoundingClientRect()
+
+      node.scrollLeft += after.left + x * after.width - clientX
+      node.scrollTop += after.top + y * after.height - clientY
+    }
+
+    const fromModel = changes.pipe(
+      Stream.map(({ zoom }) => {
+        if (zoom === applied) return
+
+        const pane = node.getBoundingClientRect()
+
+        apply(zoom, pane.left + pane.width / 2, pane.top + pane.height / 2)
+      }),
+      Stream.drain
+    )
+
+    const pinches = Stream.callback<number>((queue) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const listening = new AbortController()
+          const { signal } = listening
+          let dragging: number | undefined
+
+          node.addEventListener("wheel", (event) => {
+            if (!(event.ctrlKey || event.metaKey) || !isWide()) return
+
+            // Otherwise the browser zooms the whole page.
+            event.preventDefault()
+
+            const zoom = clampZoom(applied * Math.exp(-event.deltaY / 100))
+
+            if (zoom === applied) return
+
+            apply(zoom, event.clientX, event.clientY)
+            Queue.offerUnsafe(queue, zoom)
+          }, { passive: false, signal })
+
+          node.addEventListener("pointerdown", (event) => {
+            // Only the area under the commands pans: a press on a command, or on a scrollbar, is left alone.
+            const pans = event.target instanceof Element && event.target.closest("[data-pan]") !== null
+
+            if (event.pointerType !== "mouse" || event.button !== 0 || !pans || !isWide()) return
+
+            dragging = event.pointerId
+            node.setPointerCapture(event.pointerId)
+          }, { signal })
+
+          node.addEventListener("pointermove", (event) => {
+            if (dragging !== event.pointerId) return
+
+            node.scrollLeft -= event.movementX
+            node.scrollTop -= event.movementY
+          }, { signal })
+
+          const released = (event: PointerEvent): void => {
+            if (dragging === event.pointerId) dragging = undefined
+          }
+
+          node.addEventListener("pointerup", released, { signal })
+          node.addEventListener("pointercancel", released, { signal })
+
+          return listening
+        }),
+        (listening) => Effect.sync(() => listening.abort())
+      )
+    )
+
+    return Stream.merge(fromModel, pinches)
   }
 )
 
@@ -442,19 +585,16 @@ const itemField = (index: number, field: "quantity" | "unitPrice") => `items.${i
 const dateOf = (invoice: Invoice.Invoice, field: typeof DateField.Type): IsoDate.IsoDate =>
   field === "issueDate" ? invoice.issueDate : Invoice.dueDate(invoice)
 
-const updatedCurrency = InvoiceEditorDef.update("UpdatedCurrency", ($, { value }) => {
+// Amounts keep the numbers they show when the new currency has more or fewer decimal places.
+const pickedCurrency = InvoiceEditorDef.update("PickedCurrency", ($, { value }) => {
   const code = value.trim().toUpperCase()
-  const { invoice } = $.model
 
-  return typed(
-    $.model,
-    "currency",
-    value.toUpperCase(),
-    Schema.is(Invoice.CurrencyCode)(code) ? Option.some(Invoice.withCurrency(invoice, code)) : Option.none()
-  )
+  return Schema.is(Invoice.CurrencyCode)(code)
+    ? { ...replaced($.model, Invoice.withCurrency($.model.invoice, code)), popup: null }
+    : $.model
 })
 
-// A calendar opens on the month of the date it edits.
+// A calendar opens on the month of the date it edits, and the currency picker with an empty search.
 const requestedOpenPopup = InvoiceEditorDef.update(
   "RequestedOpenPopup",
   ($, { popup }) =>
@@ -463,7 +603,7 @@ const requestedOpenPopup = InvoiceEditorDef.update(
         popup,
         calendarMonth: IsoDate.toDateTime(IsoDate.startOfMonth(dateOf($.model.invoice, popup)))
       })
-      : $.evolve({ popup })
+      : $.evolve({ popup, currencySearch: "" })
 )
 
 const pickedDueTerms = InvoiceEditorDef.update("PickedDueTerms", ($, { value }) => {
@@ -576,17 +716,15 @@ interface ParsedOptions {
   readonly label: string
   readonly value: string
   readonly placeholder?: string
-  readonly list?: string
   readonly updated: (value: string) => InvoiceEditorMessage
 }
 
-/** An input whose text has to parse: a number or a currency code. */
+/** An input whose text has to parse as a number. */
 const ParsedInput = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel, options: ParsedOptions) =>
   h.input
     .attrs({
       type: "text",
-      inputmode: options.list === undefined ? "decimal" : undefined,
-      list: options.list,
+      inputmode: "decimal",
       placeholder: options.placeholder,
       autocomplete: "off",
       "aria-label": options.label,
@@ -614,14 +752,14 @@ const POSITIONER = "m-0 overflow-visible border-0 bg-transparent p-0 outline-non
 
 // A hairline drawn as a shadow sits outside the box, so the corners stay clean. The popup grows from its anchor.
 const POPUP =
-  "origin-(--transform-origin) rounded-xl bg-white text-primary shadow-[0_0_0_1px_rgb(0_0_0/7%),0_4px_6px_-2px_rgb(0_0_0/5%),0_12px_28px_-6px_rgb(0_0_0/12%)] outline-none transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none starting:scale-[0.97] starting:opacity-0"
+  "origin-(--transform-origin) rounded-xl bg-surface text-primary [box-shadow:var(--shadow-popup)] outline-none transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none starting:scale-[0.97] starting:opacity-0"
 
 const TRIGGER =
   "flex cursor-pointer items-center gap-1.5 rounded-md text-[14px] text-primary outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
 
 // The popup's radius is 12px and its padding 4px, so an item's is 8px.
 const MENU_ITEM =
-  "relative flex cursor-default items-center rounded-lg py-1.5 pr-8 pl-2.5 text-[13px] outline-none select-none data-[highlighted]:bg-neutral-100"
+  "relative flex cursor-default items-center rounded-lg py-1.5 pr-8 pl-2.5 text-[13px] outline-none select-none data-[highlighted]:bg-hover"
 
 const DUE_CHOICES = [
   ...Invoice.NET_DAYS.map((days) => ({ value: String(days), label: Invoice.termsLabel(days) })),
@@ -670,10 +808,10 @@ const DueTerms = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
 )
 
 const GHOST_BUTTON =
-  `flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none ${PRESS} hover:bg-neutral-100 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary/25 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground`
+  `flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none ${PRESS} hover:bg-hover hover:text-primary focus-visible:ring-2 focus-visible:ring-primary/25 disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground`
 
 const DAY =
-  "flex size-8 cursor-pointer items-center justify-center rounded-md text-[13px] tabular-nums outline-none hover:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-primary/25 data-[outside-month]:text-placeholder data-[today]:bg-neutral-100 data-[today]:font-medium data-[selected]:!bg-primary data-[selected]:text-white"
+  "flex size-8 cursor-pointer items-center justify-center rounded-md text-[13px] tabular-nums outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-primary/25 data-[outside-month]:text-placeholder data-[today]:bg-hover data-[today]:font-medium data-[selected]:!bg-primary data-[selected]:text-primary-foreground"
 
 const DateRow = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel, options: {
   readonly field: typeof DateField.Type
@@ -761,7 +899,82 @@ const DateRow = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel, options
   })
 )
 
-const CURRENCIES = Intl.supportedValuesOf("currency")
+// The currencies most invoices are in come first; the rest follow in the order of their codes.
+const COMMON_CURRENCIES = ["USD", "EUR", "GBP", "BRL", "CAD", "AUD", "CHF", "JPY"]
+const currencyNames = new Intl.DisplayNames(["en"], { type: "currency" })
+
+const CURRENCY_NAMES = new Map(
+  [...COMMON_CURRENCIES, ...Intl.supportedValuesOf("currency").filter((code) => !COMMON_CURRENCIES.includes(code))]
+    .map((code) => [code, currencyNames.of(code) ?? code])
+)
+
+// The label is what the search matches, so a currency is found by its code or by its name.
+const CURRENCY_CHOICES = Array.from(CURRENCY_NAMES, ([code, name]) => ({ value: code, label: `${code} ${name}` }))
+
+/**
+ * The currency of the invoice: a button showing its code, which opens a list
+ * of every currency with a search box above it.
+ */
+const CurrencyPicker = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
+  Combobox(h, {
+    key: "currency",
+    props: {
+      open: model.popup === "currency",
+      value: model.invoice.currency,
+      inputValue: model.currencySearch,
+      items: CURRENCY_CHOICES,
+      inputInPopup: true,
+      autoHighlight: true,
+      side: "bottom",
+      align: "end",
+      sideOffset: 8
+    },
+    onEmit: {
+      RequestedOpen: () => InvoiceEditorMessage.RequestedOpenPopup({ popup: "currency" }),
+      RequestedClose: () => InvoiceEditorMessage.RequestedClosePopup({ popup: "currency" }),
+      Picked: ({ value }) => InvoiceEditorMessage.PickedCurrency({ value: String(value) }),
+      RequestedInputValue: ({ inputValue }) => InvoiceEditorMessage.UpdatedCurrencySearch({ value: inputValue }),
+      Highlighted: () => undefined,
+      Settled: () => undefined
+    },
+    view: (combobox) =>
+      FieldGroup(h, {
+        label: "Currency",
+        children: [
+          combobox.trigger(h.button.class(TRIGGER).attr("aria-label", `Currency: ${model.invoice.currency}`))
+            .children(
+              h.span.class("tabular-nums").children(model.invoice.currency),
+              combobox.icon(h.span.class("text-muted-foreground")).children(ChevronDownIcon(h))
+            ),
+          combobox.positioner(h.div.class(POSITIONER)).children(
+            combobox.popup(h.div.class(POPUP, "w-64")).children(
+              h.div.class("border-b border-line px-3.5 py-2.5").children(
+                combobox.input(
+                  h.input.class(
+                    "w-full bg-transparent text-[13px] text-primary outline-none placeholder:text-placeholder"
+                  )
+                ).attrs({ placeholder: "Search currencies", "aria-label": "Search currencies", spellcheck: "false" })
+              ),
+              combobox.empty(h.div.class("px-3 text-center text-[13px] text-muted-foreground *:py-5")).children(
+                h.p("No currency found")
+              ),
+              combobox.list(h.div.class("scroll-fade-y scrollbar-none max-h-72 overflow-y-auto p-1")).children(
+                combobox.items.map(({ value }) =>
+                  combobox.item({ element: h.div.class(MENU_ITEM, "gap-3"), value }).children(
+                    h.span.class("w-9 shrink-0 font-medium tabular-nums").children(value),
+                    h.span.class("truncate text-muted-foreground").children(CURRENCY_NAMES.get(value) ?? ""),
+                    combobox.itemIndicator({ element: h.span.class("absolute right-2.5"), value })?.children(
+                      CheckIcon(h)
+                    )
+                  )
+                )
+              )
+            )
+          )
+        ]
+      })
+  })
+)
 
 const Details = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) => {
   const { invoice } = model
@@ -776,23 +989,13 @@ const Details = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) => {
     DateRow(h, model, { field: "issueDate", label: "Issue date" }),
     DueTerms(h, model),
     DateRow(h, model, { field: "dueDate", label: "Due date" }),
-    ParsedField(h, model, {
-      field: "currency",
-      label: "Currency",
-      list: h.id("currencies"),
-      placeholder: "USD",
-      value: invoice.currency,
-      updated: (value) => InvoiceEditorMessage.UpdatedCurrency({ value })
-    }),
+    CurrencyPicker(h, model),
     TextInput(h, {
       label: "Payment terms",
       value: invoice.paymentTerms,
       placeholder: "Net 30",
       updated: (value) => InvoiceEditorMessage.UpdatedText({ field: "paymentTerms", value })
-    }),
-    h.datalist.id(h.id("currencies")).children(
-      CURRENCIES.map((code) => h.option.key(code).attr("value", code))
-    )
+    })
   )
 })
 
@@ -861,7 +1064,7 @@ const REVEALED =
   "pointer-events-none absolute top-1/2 flex -translate-y-1/2 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100"
 
 const MOVE_BUTTON =
-  `flex h-5 w-6 cursor-pointer items-center justify-center rounded-md text-placeholder outline-none ${PRESS} hover:bg-neutral-100 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary/25 disabled:hidden`
+  `flex h-5 w-6 cursor-pointer items-center justify-center rounded-md text-placeholder outline-none ${PRESS} hover:bg-hover hover:text-primary focus-visible:ring-2 focus-visible:ring-primary/25 disabled:hidden`
 
 /**
  * The move and remove buttons of a row in a list. They sit in the margins on
@@ -899,10 +1102,10 @@ const RowActions = InvoiceEditorDef.fragment((h, options: {
 ])
 
 const PRIMARY_BUTTON =
-  `cursor-pointer rounded-full bg-primary px-4 py-2 text-[13px] font-medium text-white outline-none ${PRESS} hover:opacity-85 focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-2 disabled:cursor-default disabled:opacity-40 disabled:hover:opacity-40`
+  `cursor-pointer rounded-full bg-primary px-4 py-2 text-[13px] font-medium text-primary-foreground outline-none ${PRESS} hover:opacity-85 focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-default disabled:opacity-40 disabled:hover:opacity-40`
 
 const SECONDARY_BUTTON =
-  `cursor-pointer rounded-full px-4 py-2 text-[13px] font-medium text-primary shadow-[inset_0_0_0_1px_var(--color-line)] outline-none ${PRESS} hover:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-primary/25`
+  `cursor-pointer rounded-full px-4 py-2 text-[13px] font-medium text-primary shadow-[inset_0_0_0_1px_var(--color-line)] outline-none ${PRESS} hover:bg-hover focus-visible:ring-2 focus-visible:ring-primary/25`
 
 const QUIET_BUTTON =
   "cursor-pointer text-[13px] text-muted-foreground hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
@@ -1107,33 +1310,49 @@ const SEGMENT = "px-3 py-1 text-center whitespace-nowrap"
  * label turns white as the thumb's edge passes it. Moving the clip is paint
  * only: nothing is laid out again while it slides.
  */
-const PageSizeSwitch = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
+const Segmented = InvoiceEditorDef.fragment((h, options: {
+  readonly label: string
+  readonly pressed: string
+  readonly segments: ReadonlyArray<{
+    readonly value: string
+    readonly label: string
+    readonly picked: InvoiceEditorMessage
+  }>
+}) =>
   h.div
-    .class("segmented relative inline-flex rounded-full border border-line bg-white p-0.5 text-[13px]")
-    .attrs({ role: "group", "aria-label": "Page size" })
-    .onMount(TrackThumb({ pressed: model.invoice.pageSize }))
+    .class("segmented relative inline-flex rounded-full border border-line bg-background p-0.5 text-[13px]")
+    .attrs({ role: "group", "aria-label": options.label })
+    .onMount(TrackThumb({ pressed: options.pressed }))
     .children(
-      Invoice.PageSize.literals.map((pageSize) =>
+      options.segments.map(({ label, picked, value }) =>
         h.button
-          .key(pageSize)
-          .attrs({ type: "button", "aria-pressed": String(model.invoice.pageSize === pageSize) })
+          .key(value)
+          .attrs({ type: "button", "aria-pressed": String(options.pressed === value) })
           .class(
             SEGMENT,
             "cursor-pointer rounded-full text-muted-foreground outline-none hover:text-primary",
             "focus-visible:ring-2 focus-visible:ring-primary/25 [-webkit-tap-highlight-color:transparent]"
           )
-          .on("click", InvoiceEditorMessage.PickedPageSize({ pageSize }))
-          .children(pageSizeLabel(pageSize))
+          .on("click", picked)
+          .children(label)
       ),
       h.div
         .attrs({ "aria-hidden": "true", "data-thumb": "" })
-        .class("segmented-thumb pointer-events-none absolute inset-0.5 flex bg-primary text-white")
-        .children(
-          Invoice.PageSize.literals.map((pageSize) =>
-            h.span.key(pageSize).class(SEGMENT).children(pageSizeLabel(pageSize))
-          )
-        )
+        .class("segmented-thumb pointer-events-none absolute inset-0.5 flex bg-primary text-primary-foreground")
+        .children(options.segments.map(({ label, value }) => h.span.key(value).class(SEGMENT).children(label)))
     )
+)
+
+const PageSizeSwitch = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
+  Segmented(h, {
+    label: "Page size",
+    pressed: model.invoice.pageSize,
+    segments: Invoice.PageSize.literals.map((pageSize) => ({
+      value: pageSize,
+      label: pageSizeLabel(pageSize),
+      picked: InvoiceEditorMessage.PickedPageSize({ pageSize })
+    }))
+  })
 )
 
 const sampleLabel = (model: InvoiceEditorModel): string => model.demo === null ? "Sample data" : "Exit demo"
@@ -1164,10 +1383,13 @@ const Actions = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
   )
 )
 
-const DOCK = "rounded-2xl bg-primary shadow-[0_0_0_1px_rgb(255_255_255/8%)_inset,0_8px_24px_-4px_rgb(0_0_0/35%)]"
+const DOCK = "rounded-2xl bg-dock shadow-[0_0_0_1px_rgb(255_255_255/8%)_inset,0_8px_24px_-4px_rgb(0_0_0/35%)]"
 
 const DOCK_BUTTON =
   `flex h-9 min-w-9 cursor-pointer items-center justify-center gap-1.5 rounded-xl px-2 text-white/75 outline-none ${PRESS} hover:bg-white/10 hover:text-white focus-visible:bg-white/15 focus-visible:text-white active:bg-white/15 [-webkit-tap-highlight-color:transparent]`
+
+const DOCK_DISABLED =
+  "disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-white/75"
 
 /**
  * The commands on a small screen: a dock floating over the bottom edge, in
@@ -1261,9 +1483,9 @@ const CommandDock = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) => 
 
 // `closedby="any"` on a dialog makes a press on its backdrop a close request, sent as `cancel` like Escape.
 const DIALOG =
-  "m-auto w-[min(36rem,calc(100vw-2rem))] rounded-2xl bg-white p-6 text-primary shadow-[0_0_0_1px_rgb(0_0_0/7%),0_24px_60px_-12px_rgb(0_0_0/25%)] outline-none backdrop:bg-black/25 transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none starting:scale-[0.97] starting:opacity-0"
+  "m-auto w-[min(36rem,calc(100vw-2rem))] rounded-2xl bg-surface p-6 text-primary [box-shadow:var(--shadow-dialog)] outline-none backdrop:bg-black/25 transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none starting:scale-[0.97] starting:opacity-0"
 
-const CODE = "rounded-xl bg-neutral-100 p-3 font-mono text-[12px] leading-relaxed text-primary outline-none"
+const CODE = "rounded-xl bg-hover p-3 font-mono text-[12px] leading-relaxed text-primary outline-none"
 
 const DialogError = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
   model.dialogError !== null &&
@@ -1313,7 +1535,7 @@ const ImportDialog = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
             h.div
               .class(
                 "flex items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-300 px-4 py-5 text-[13px] text-muted-foreground",
-                "group-data-[drag-over]:border-primary group-data-[drag-over]:bg-neutral-100 group-data-[drag-over]:text-primary"
+                "group-data-[drag-over]:border-primary group-data-[drag-over]:bg-hover group-data-[drag-over]:text-primary"
               )
               .children(
                 UploadIcon(h),
@@ -1369,7 +1591,7 @@ const ExportDialog = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
             })
             .class(
               GHOST_BUTTON,
-              "absolute top-2 right-2 size-8 bg-white shadow-[0_0_0_1px_rgb(0_0_0/7%)] hover:bg-white"
+              "absolute top-2 right-2 size-8 bg-surface shadow-[0_0_0_1px_var(--color-line)] hover:bg-surface"
             )
             .on("click", InvoiceEditorMessage.ClickedCopyExport())
             .children(model.copied ? CheckIcon(h) : CopyIcon(h))
@@ -1411,33 +1633,96 @@ const DemoBanner = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
     )
 )
 
+/**
+ * The zoom commands on a wide screen: a dock like `CommandDock`, floating over
+ * the bottom of the preview. The percentage in the middle is read out as it
+ * changes. A small screen has none: there the browser's own pinch zooms the page.
+ */
+const ZoomDock = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
+  h.div
+    .attrs({ role: "group", "aria-label": "Zoom" })
+    .class("absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 p-1.5 max-lg:hidden", DOCK)
+    .children(
+      h.button
+        .attrs({ type: "button", "aria-label": "Zoom out", title: "Zoom out" })
+        .class(DOCK_BUTTON, DOCK_DISABLED)
+        .disabled(model.zoom <= MIN_ZOOM)
+        .on("click", InvoiceEditorMessage.ClickedZoomOut())
+        .children(ZoomOutIcon(h, 18)),
+      h.output
+        .attr("aria-label", "Zoom level")
+        .class("w-12 text-center text-[13px] font-medium text-white tabular-nums select-none")
+        .children(`${Math.round(model.zoom * 100)}%`),
+      h.button
+        .attrs({ type: "button", "aria-label": "Zoom in", title: "Zoom in" })
+        .class(DOCK_BUTTON, DOCK_DISABLED)
+        .disabled(model.zoom >= MAX_ZOOM)
+        .on("click", InvoiceEditorMessage.ClickedZoomIn())
+        .children(ZoomInIcon(h, 18)),
+      h.div.attr("aria-hidden", "true").class("mx-1 h-5 w-px bg-white/15"),
+      h.button
+        .attrs({ type: "button", "aria-label": "Re-center", title: "Re-center: fit the page to the pane" })
+        .class(DOCK_BUTTON, DOCK_DISABLED)
+        .disabled(model.zoom === 1)
+        .on("click", InvoiceEditorMessage.ClickedRecenter())
+        .children(RecenterIcon(h, 18))
+    )
+)
+
+// A page's width over its height, which fits the sheet to the pane (see styles.css).
+const PAGE_ASPECT: Record<Invoice.PageSize, string> = { A4: "0.7071", Letter: "0.7727" }
+
 const PreviewPane = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
   h.aside
-    .class("dotted flex min-w-0 flex-1 scroll-mt-12 flex-col gap-8 px-6 py-6 lg:h-full lg:overflow-y-auto lg:px-10")
+    .class("dotted relative flex min-w-0 flex-1 scroll-mt-12 flex-col lg:h-full")
     .attrs({ "aria-label": "PDF preview", id: "preview" })
     .children(
-      Actions(h, model),
-      h.div.class("mx-auto flex w-full max-w-[640px] flex-col gap-4 pb-10").children(
-        Preview.match(model.preview, {
-          Pending: () => h.p.class("text-center text-[13px] text-muted-foreground").children("Rendering the PDF…"),
-          Rendered: () => null,
-          Failed: ({ reason }) =>
-            h.p
-              .class("rounded-xl border border-danger/30 bg-white px-4 py-3 text-[13px] text-danger")
-              .attr("role", "alert")
-              .children(reason)
-        }),
-        h.div
-          .class(
-            "pages flex flex-col gap-6 transition-opacity",
-            Preview.is("Failed")(model.preview) && "opacity-40"
-          )
-          .onMount(
-            DrawPreview({ invoice: model.invoice }).pipe(
-              Mount.map((preview) => InvoiceEditorMessage.ChangedPreview({ preview }))
+      h.div
+        .class("preview-scroller min-w-0 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col")
+        .onMount(
+          ZoomPreview({ zoom: model.zoom }).pipe(Mount.map((zoom) => InvoiceEditorMessage.PinchedPreview({ zoom })))
+        )
+        .children(
+          // The commands stick to the top of the scroller, in reach however the page is zoomed and panned, and a
+          // zoomed page slides under them through a blur that fades out (see styles.css).
+          h.div.class("preview-bar sticky top-0 left-0 z-10 shrink-0 px-10 pt-6 pb-4 max-lg:hidden").children(
+            Actions(h, model)
+          ),
+          // The area the sheet is fitted to. Its content is as wide as the zoomed sheet, so the padding is there
+          // at both ends of a pan, and the dock floats over the last of it.
+          h.div.attr("data-pan", "").class(
+            "preview-area lg:min-h-0 lg:flex-1",
+            model.zoom > 1 && "lg:cursor-grab lg:active:cursor-grabbing"
+          ).children(
+            h.div.class("px-6 pt-6 pb-10 lg:w-max lg:min-w-full lg:px-10 lg:pt-2 lg:pb-24").children(
+              h.div.attr("data-sheet", "").class("preview-sheet flex flex-col gap-4").style({
+                "--page-aspect": PAGE_ASPECT[model.invoice.pageSize]
+              }).children(
+                Preview.match(model.preview, {
+                  Pending: () =>
+                    h.p.class("text-center text-[13px] text-muted-foreground").children("Rendering the PDF…"),
+                  Rendered: () => null,
+                  Failed: ({ reason }) =>
+                    h.p
+                      .class("rounded-xl border border-danger/30 bg-surface px-4 py-3 text-[13px] text-danger")
+                      .attr("role", "alert")
+                      .children(reason)
+                }),
+                h.div
+                  .class(
+                    "pages flex flex-col gap-6 transition-opacity",
+                    Preview.is("Failed")(model.preview) && "opacity-40"
+                  )
+                  .onMount(
+                    DrawPreview({ invoice: model.invoice, zoom: model.zoom }).pipe(
+                      Mount.map((preview) => InvoiceEditorMessage.ChangedPreview({ preview }))
+                    )
+                  )
+              )
             )
           )
-      )
+        ),
+      ZoomDock(h, model)
     )
 )
 
@@ -1450,10 +1735,12 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
     invoice: $.props.initialInvoice,
     draft: null,
     popup: null,
+    currencySearch: "",
     calendarMonth: IsoDate.toDateTime(IsoDate.startOfMonth($.props.initialInvoice.issueDate)),
     edits: 0,
     savedEdits: 0,
     preview: Preview.Pending(),
+    zoom: 1,
     notice: $.props.initialNotice,
     demo: null,
     dialog: null,
@@ -1479,7 +1766,8 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
     PickedDueTerms: pickedDueTerms,
     PickedDate: pickedDate,
     RequestedCalendarMonth: ($, { month }) => $.evolve({ calendarMonth: month }),
-    UpdatedCurrency: updatedCurrency,
+    PickedCurrency: pickedCurrency,
+    UpdatedCurrencySearch: ($, { value }) => $.evolve({ currencySearch: value }),
     UpdatedItemDescription: ($, { index, value }) =>
       edited($.model, Invoice.withItem($.model.invoice, index, { description: value })),
     UpdatedItemQuantity: ($, { index, value }) =>
@@ -1542,6 +1830,7 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
       ...edited($.model, { ...$.model.invoice, pageSize }),
       popup: $.model.popup === "pageSize" ? null : $.model.popup
     }),
+    // Picking in the dock's own little menu also puts that menu away.
     ClickedPageSizeCommand: ($) => $.evolve({ popup: $.model.popup === "pageSize" ? null : "pageSize" }),
     ClickedDuplicate: ($) => replaced($.model, Invoice.duplicateForNextMonth($.model.invoice)),
     // The button is a toggle: it enters demo mode, and pressed again it leaves.
@@ -1588,6 +1877,11 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
     FailedSaveInvoice: ($, { reason }) =>
       $.evolve({ notice: `The invoice couldn't be saved in this browser. ${reason}` }),
     ChangedPreview: ($, { preview }) => $.evolve({ preview }),
+    ClickedZoomIn: ($) => $.evolve({ zoom: zoomedIn($.model.zoom) }),
+    ClickedZoomOut: ($) => $.evolve({ zoom: zoomedOut($.model.zoom) }),
+    // At 1 the sheet fits the pane, where the layout centres it.
+    ClickedRecenter: ($) => $.evolve({ zoom: 1 }),
+    PinchedPreview: ($, { zoom }) => $.evolve({ zoom: clampZoom(zoom) }),
     ClickedDismissNotice: ($) => $.evolve({ notice: null })
   },
   // Saves once the invoice has held still for a moment. `edits` is part of
@@ -1664,7 +1958,11 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
 
 export const InvoiceEditor = InvoiceEditorNoDeps.pipe(
   Component.provide(
-    Layer.mergeAll(SaveInvoice.layer, DownloadPdf.layer, PdfCanvas.layer).pipe(
+    Layer.mergeAll(
+      SaveInvoice.layer,
+      DownloadPdf.layer,
+      PdfCanvas.layer
+    ).pipe(
       Layer.provideMerge(Layer.mergeAll(InvoiceStore.layer, PdfRenderer.layer.pipe(Layer.provide(bundledFonts))))
     )
   )
