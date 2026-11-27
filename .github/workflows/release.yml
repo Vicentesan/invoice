@@ -1,0 +1,102 @@
+name: Release
+
+# Run by hand from the Actions tab. It checks the repository, then deploys the
+# website and publishes the CLI, each only if its box is ticked.
+on:
+  workflow_dispatch:
+    inputs:
+      website:
+        description: Deploy the website to invoices.vicente.fyi
+        type: boolean
+        default: true
+      cli:
+        description: Publish invoices-cli and its platform binaries to npm as latest
+        type: boolean
+        default: true
+
+# One release at a time, and never cancel one that is half way through.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+
+  website:
+    name: Deploy website
+    needs: check
+    if: inputs.website
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://invoices.vicente.fyi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      # Alchemy builds the app with Vite and updates the `prod` stage on Cloudflare.
+      - name: Deploy
+        working-directory: apps/web
+        run: bunx alchemy deploy --stage prod --no-input
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  cli:
+    name: Publish CLI
+    needs: check
+    if: inputs.cli
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # npm trusted publishing: the job proves who it is with a short-lived
+      # OIDC token, so there is no npm token stored in this repository.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install --global npm@latest
+      - run: bun install --frozen-lockfile
+      # Cross-compiles a self-contained binary for every platform into its own
+      # npm package, plus the small `invoices-cli` package that launches it.
+      - name: Build every platform
+        working-directory: apps/cli
+        run: bun run build
+      # The version to publish is the one in apps/cli/package.json. A package
+      # already on npm at that version is left alone, so the workflow can be
+      # re-run to finish a release that stopped half way, or to redeploy the
+      # website alone. The platform packages go first, so the launcher is never
+      # published pointing at binaries that aren't there yet.
+      - name: Publish
+        working-directory: apps/cli/dist/npm
+        run: |
+          version=$(node --print "require('./invoices-cli/package.json').version")
+          for package in invoices-cli-* invoices-cli; do
+            if npm view "$package@$version" version > /dev/null 2>&1; then
+              echo "$package@$version is already on npm; skipped." >> "$GITHUB_STEP_SUMMARY"
+            else
+              (cd "$package" && npm publish --tag latest --access public)
+              echo "Published $package@$version as latest." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
