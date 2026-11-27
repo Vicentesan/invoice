@@ -7,7 +7,15 @@ dist
 
 # alchemy
 .alchemy
+
+# npm pack
 *.tgz
+
+# temporary files `bun build --compile` leaves behind when it is interrupted
+*.bun-build
+
+# PDFs the CLI writes when it is tried from the repository root
+/invoice-*.pdf
 
 # code coverage
 coverage
