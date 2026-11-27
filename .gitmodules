@@ -1,0 +1,6 @@
+[submodule ".vendor/effect"]
+	path = .vendor/effect
+	url = git@github.com:effect-ts/effect.git
+[submodule ".vendor/effect-ui"]
+	path = .vendor/effect-ui
+	url = git@github.com:effect-ts/ui.git
