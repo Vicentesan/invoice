@@ -8,12 +8,15 @@ import {
   Calendar03Icon,
   CalendarAdd01Icon,
   Cancel01Icon,
+  CenterFocusIcon,
   Copy01Icon,
   DiceIcon as Dice,
   Download04Icon,
   File01Icon,
   FileExportIcon,
   FileImportIcon,
+  MinusSignIcon,
+  PlusSignIcon,
   Tick02Icon,
   Upload04Icon,
   ViewIcon
@@ -66,3 +69,6 @@ export const ImportIcon = icon(FileImportIcon)
 export const ExportIcon = icon(FileExportIcon)
 export const DownloadIcon = icon(Download04Icon)
 export const PageIcon = icon(File01Icon)
+export const ZoomOutIcon = icon(MinusSignIcon)
+export const ZoomInIcon = icon(PlusSignIcon)
+export const RecenterIcon = icon(CenterFocusIcon)

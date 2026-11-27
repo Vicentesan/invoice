@@ -3,14 +3,28 @@
 @source "../index.html";
 @import "@fontsource-variable/inter";
 
+/* Shadows too long to write where they are used. */
+:root {
+  --shadow-popup: 0 0 0 1px rgb(0 0 0 / 7%), 0 4px 6px -2px rgb(0 0 0 / 5%), 0 12px 28px -6px rgb(0 0 0 / 12%);
+  --shadow-dialog: 0 0 0 1px rgb(0 0 0 / 7%), 0 24px 60px -12px rgb(0 0 0 / 25%);
+  --shadow-page: 0 0 0 1px #e9e9e9, 0 1px 2px rgb(0 0 0 / 4%), 0 12px 32px rgb(0 0 0 / 6%);
+}
+
 @theme inline {
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-background: #fff;
+  /* Popups and dialogs. */
+  --color-surface: #fff;
+  --color-hover: #f5f5f5;
   --color-foreground: #000;
   --color-muted-foreground: #6f6f6f;
   --color-primary: #1a1a1a;
+  --color-primary-foreground: #fff;
   --color-placeholder: #a8a8a8;
   --color-line: #e9e9e9;
   --color-danger: #c13515;
+  /* The floating docks of commands. */
+  --color-dock: #1a1a1a;
 }
 
 /* The "Preview" link on a small screen glides to the preview. */
@@ -46,10 +60,69 @@ html {
   height: auto;
   background: #fff;
   border-radius: 14px;
-  box-shadow:
-    0 0 0 1px var(--color-line),
-    0 1px 2px rgb(0 0 0 / 4%),
-    0 12px 32px rgb(0 0 0 / 6%);
+  box-shadow: var(--shadow-page);
+}
+
+/*
+ * The sheet holds the pages. On a small screen it fills the column. On a wide
+ * one the preview scrolls on its own and can be zoomed. The scroller holds the
+ * bar of commands, stuck to its top, and under it the area the sheet is fitted
+ * to. At a zoom of 1 the sheet is as wide as lets one whole page show in that
+ * area, so there is nothing to scroll. `ZoomPreview` sets `--zoom` on the
+ * scroller, and the sheet is that many times its fitted width, so a zoomed
+ * sheet overflows the area and the scroller pans over it. `--page-aspect` is
+ * the page's width over its height.
+ */
+.preview-sheet {
+  width: 100%;
+  max-width: 640px;
+  margin-inline: auto;
+}
+
+@media (width >= 64rem) {
+  .preview-scroller {
+    overflow: auto;
+  }
+
+  /* Its size comes from the scroller alone, never from the sheet, which overflows it when zoomed. */
+  .preview-area {
+    container-type: size;
+  }
+
+  /* The 5rem is the padding on either side of the sheet, and the 6.5rem the padding above and below it. */
+  .preview-sheet {
+    width: calc(
+      max(240px, min(640px, 100cqw - 5rem, (100cqh - 6.5rem) * var(--page-aspect, 0.707))) * var(--zoom, 1)
+    );
+    max-width: none;
+  }
+
+  /*
+   * A page scrolled under the commands isn't cut off at their edge: it shows
+   * through a progressive blur, strong behind the commands and fading to
+   * nothing a little below them, with a wash of the backdrop for contrast.
+   * Two layers of blur, each masked to fade out, make the progression.
+   */
+  .preview-bar::before,
+  .preview-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 -1.75rem;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  .preview-bar::before {
+    background: linear-gradient(to bottom, #fafafa 50%, transparent);
+    opacity: 0.8;
+    backdrop-filter: blur(4px);
+    mask-image: linear-gradient(to bottom, black 75%, transparent);
+  }
+
+  .preview-bar::after {
+    backdrop-filter: blur(18px);
+    mask-image: linear-gradient(to bottom, black 60%, transparent);
+  }
 }
 
 /* The currency field lists its options without the drop-down arrow. */
@@ -141,7 +214,7 @@ input[list]::-webkit-calendar-picker-indicator {
 
 .segmented:not([data-tracking]) [aria-pressed="true"] {
   background-color: var(--color-primary);
-  color: #fff;
+  color: var(--color-primary-foreground);
 }
 
 @media (prefers-reduced-motion: reduce) {

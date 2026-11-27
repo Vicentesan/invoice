@@ -16,6 +16,8 @@
     "deploy": "bun run --filter @invoice/web deploy",
     "deploy:plan": "bun run --filter @invoice/web deploy:plan",
     "cli": "bun apps/cli/src/bin.ts",
+    "changeset": "changeset",
+    "changeset:version": "changeset version && dprint fmt",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run test",
     "format": "dprint fmt",
     "format:check": "dprint check",
@@ -25,6 +27,7 @@
     "typecheck": "effect-tsgo patch && tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
+    "@changesets/cli": "3.1.0",
     "@effect/tsgo": "0.73.7",
     "@oxlint/plugins": "1.95.0",
     "@types/bun": "1.4.5",
