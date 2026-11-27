@@ -62,6 +62,8 @@ jobs:
     needs: check
     if: inputs.cli
     runs-on: ubuntu-latest
+    # The same environment as the website, so a publish waits for the same approval.
+    environment: production
     permissions:
       contents: read
       # npm trusted publishing: the job proves who it is with a short-lived
