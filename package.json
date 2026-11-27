@@ -11,14 +11,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "alchemy deploy --stage prod",
+    "deploy:plan": "alchemy plan --stage prod",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run test",
     "format": "dprint fmt",
     "format:check": "dprint check",
     "lint": "oxlint --disable-nested-config",
     "lint:fix": "oxlint --disable-nested-config --fix",
     "test": "vitest run",
-    "typecheck": "effect-tsgo patch && tsc --noEmit -p tsconfig.json",
-    "preview": "vite preview"
+    "typecheck": "effect-tsgo patch && tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@effect/ui": "https://pkg.pr.new/Effect-TS/ui/@effect/ui@22128c65",
@@ -30,11 +32,15 @@
     "pdfjs-dist": "6.5.438"
   },
   "devDependencies": {
+    "@alchemy.run/cloudflare": "2.0.0-beta.87",
+    "@effect/platform-bun": "4.1.7",
+    "@effect/platform-node": "4.1.7",
     "@effect/tsgo": "0.73.7",
     "@effect/vitest": "4.1.7",
     "@oxlint/plugins": "1.95.0",
     "@tailwindcss/vite": "4.3.5",
     "@types/bun": "1.4.5",
+    "alchemy": "2.0.0-beta.87",
     "dprint": "0.65.0",
     "oxlint": "1.95.0",
     "oxlint-tsgolint": "7.0.2009",

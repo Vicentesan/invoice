@@ -6,6 +6,7 @@
   ],
   "excludes": [
     ".vendor/**",
+    ".alchemy/**",
     "tools/oxlint/anti-slop/**",
     "**/dist/**",
     "**/node_modules/**"

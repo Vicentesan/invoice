@@ -83,6 +83,7 @@
   },
   "ignorePatterns": [
     ".vendor/**",
+    ".alchemy/**",
     "tools/oxlint/anti-slop/**",
     "**/coverage/**",
     "**/dist/**",

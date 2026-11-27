@@ -4,6 +4,9 @@ node_modules
 # output
 out
 dist
+
+# alchemy
+.alchemy
 *.tgz
 
 # code coverage
