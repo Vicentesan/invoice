@@ -83,6 +83,20 @@ The tests cover the money math, the due-date presets and month-end clamping, Sch
 logic, and the PDF: they extract the text of a generated file and assert that the IBAN, SWIFT code and total appear
 exactly.
 
+## Deploy
+
+The build is static files only, so it can be hosted anywhere. This repository deploys it to Cloudflare with
+[Alchemy](https://alchemy.run):
+
+```sh
+bunx alchemy profile edit --add Cloudflare   # once, to sign in
+bun run deploy:plan                          # preview the changes
+bun run deploy                               # deploy the prod stage to invoices.vicente.fyi
+```
+
+Only the `prod` stage attaches the `invoices.vicente.fyi` domain; any other stage (`bunx alchemy deploy`) stays on a
+workers.dev URL. The `vicente.fyi` zone must already exist in the Cloudflare account.
+
 ## License
 
 MIT. Inter is distributed under the SIL Open Font License; see `src/assets/fonts/OFL.txt`. The lint rules under
