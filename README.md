@@ -123,6 +123,20 @@ bun run deploy                               # deploy the prod stage to invoices
 The stack is `apps/web/alchemy.run.ts`. Only the `prod` stage attaches the `invoices.vicente.fyi` domain; any other stage (`bunx alchemy deploy`) stays on a
 workers.dev URL. The `vicente.fyi` zone must already exist in the Cloudflare account.
 
+## Release
+
+`.github/workflows/release.yml` is run by hand from the Actions tab. It runs `bun run check`, then, for each box
+ticked:
+
+- **Website**: deploys the `prod` stage to `invoices.vicente.fyi` with Alchemy. It needs the repository secrets
+  `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+- **CLI**: compiles `apps/cli` into a self-contained binary per platform and publishes them to npm under the `latest`
+  tag, the way Biome ships its CLI: `invoices-cli` holds a small launcher, and seven packages named
+  `invoices-cli-<platform>` hold the binaries as its optional dependencies, so an install downloads only the one that
+  fits. Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers), so no npm token is
+  stored. The version published is the one in `apps/cli/package.json`; a package already on npm at that version is
+  skipped.
+
 ## License
 
 MIT. Inter is distributed under the SIL Open Font License; see `packages/shared/src/assets/fonts/OFL.txt`. The lint rules under
