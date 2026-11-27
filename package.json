@@ -1,15 +1,46 @@
 {
   "name": "invoice",
-  "module": "index.ts",
-  "type": "module",
+  "version": "0.0.0",
   "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "bun@1.4.4",
+  "imports": {
+    "#domain/*": "./src/domain/*.ts"
+  },
   "scripts": {
-    "typecheck": "bun check"
+    "dev": "vite",
+    "build": "vite build",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun run test",
+    "format": "dprint fmt",
+    "format:check": "dprint check",
+    "lint": "oxlint --disable-nested-config",
+    "lint:fix": "oxlint --disable-nested-config --fix",
+    "test": "vitest run",
+    "typecheck": "effect-tsgo patch && tsc --noEmit -p tsconfig.json",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@effect/ui": "https://pkg.pr.new/Effect-TS/ui/@effect/ui@22128c65",
+    "@effect/ui-kit": "https://pkg.pr.new/Effect-TS/ui/@effect/ui-kit@22128c65",
+    "@fontsource-variable/inter": "5.3.0",
+    "@pdf-lib/fontkit": "1.1.1",
+    "effect": "4.1.7",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.5.438"
   },
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^7"
+    "@effect/tsgo": "0.73.4",
+    "@effect/vitest": "4.1.7",
+    "@oxlint/plugins": "1.95.0",
+    "@tailwindcss/vite": "4.3.5",
+    "@types/bun": "1.4.4",
+    "dprint": "0.65.0",
+    "oxlint": "1.95.0",
+    "oxlint-tsgolint": "7.0.2009",
+    "tailwindcss": "4.3.5",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.2"
   }
 }
