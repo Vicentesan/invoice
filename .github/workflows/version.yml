@@ -1,0 +1,35 @@
+name: Version
+
+# Keeps a "Version Packages" pull request up to date with the changesets on
+# main. Merging it bumps the CLI's version and writes its changelog; the
+# Release workflow, run by hand, then publishes that version.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: version
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version:
+    name: Open the version pull request
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      # No `publish` input: this workflow never publishes.
+      - uses: changesets/action@v1
+        with:
+          version: bun run changeset:version
+          title: "chore(cli): version packages"
+          commit: "chore(cli): version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
