@@ -62,7 +62,8 @@ export const AppNoDeps = Html.component({
         notice: `The invoice saved in this browser couldn't be read, so this is a blank one. ${reason}`
       })
   },
-  head: () => [Head.title("Invoice")],
+  // The same title as index.html, which is what a crawler reads before any script runs.
+  head: () => [Head.title("Free invoice generator that runs in your browser")],
   view: (h, model) =>
     h.div.children(
       AppModel.match(model, {
