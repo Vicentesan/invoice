@@ -130,12 +130,9 @@ ticked:
 
 - **Website**: deploys the `prod` stage to `invoices.vicente.fyi` with Alchemy. It needs the repository secrets
   `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-- **CLI**: compiles `apps/cli` into a self-contained binary per platform and publishes them to npm under the `latest`
-  tag, the way Biome ships its CLI: `invoices-cli` holds a small launcher, and seven packages named
-  `invoices-cli-<platform>` hold the binaries as its optional dependencies, so an install downloads only the one that
-  fits. Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers), so no npm token is
-  stored. The version published is the one in `apps/cli/package.json`; a package already on npm at that version is
-  skipped.
+- **CLI**: bundles `apps/cli` into one file that runs on Node.js and publishes `invoices-cli` to npm under the `latest`
+  tag, using npm [trusted publishing](https://docs.npmjs.com/trusted-publishers), so no npm token is stored. The
+  version published is the one in `apps/cli/package.json`; a version already on npm is skipped.
 
 ## License
 
