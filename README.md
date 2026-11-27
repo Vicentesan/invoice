@@ -47,6 +47,10 @@ What the app does with an invoice:
 - **Sample data.** One button fills the form with a made-up invoice and turns on demo mode, marked by a banner. Nothing
   is saved while demo mode is on, and pressing the button again brings your own invoice back.
 
+On a wide screen the preview fits the whole page in view and can be zoomed from 50% to 400%: with
+the dock under it, by pinching on a trackpad, or by turning the wheel with Ctrl or Cmd held, which zooms on the point
+under the pointer. Drag a zoomed page to pan it.
+
 On a small screen the commands move to a dock at the bottom of the page.
 
 ## Command line
@@ -228,6 +232,20 @@ bun run deploy                               # deploy the prod stage to invoices
 
 The stack is `apps/web/alchemy.run.ts`. Only the `prod` stage attaches the `invoices.vicente.fyi` domain. Any other
 stage stays on a workers.dev URL. The `vicente.fyi` zone must already exist in the Cloudflare account.
+
+### Versions and the changelog
+
+`invoices-cli` is versioned with [Changesets](https://github.com/changesets/changesets). A change that reaches the
+CLI comes with a changeset, a small file that names the bump and the line for the changelog:
+
+```sh
+bun run changeset
+```
+
+On `main`, the **Version** workflow gathers the pending changesets into a "Version Packages" pull request that bumps
+`apps/cli/package.json` and writes `apps/cli/CHANGELOG.md`. Merging it sets the version the Release workflow
+publishes. The pull request needs "Allow GitHub Actions to create and approve pull requests" turned on in the
+repository's Actions settings. The web app and the shared package are private and are not versioned.
 
 ### From GitHub
 
