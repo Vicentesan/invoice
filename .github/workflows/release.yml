@@ -49,9 +49,10 @@ jobs:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
       # Alchemy builds the app with Vite and updates the `prod` stage on Cloudflare.
+      # `--yes` approves the plan it prints, since nobody is there to answer a prompt.
       - name: Deploy
         working-directory: apps/web
-        run: bunx alchemy deploy --stage prod --no-input
+        run: bunx alchemy deploy --stage prod --no-input --yes
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
