@@ -3,8 +3,8 @@ import { Effect, FileSystem, Layer } from "effect"
 
 /**
  * Inter read from the given files, once per run. The paths differ by how the
- * CLI runs: the compiled binary carries the fonts inside it, and the tests
- * read them from the shared package.
+ * CLI runs: the published build keeps the fonts beside it, and the source
+ * and the tests read them from the shared package.
  */
 export const layerFiles = (files: { readonly regular: string; readonly semiBold: string }) =>
   Layer.effect(

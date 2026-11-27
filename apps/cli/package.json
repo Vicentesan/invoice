@@ -1,21 +1,38 @@
 {
   "name": "invoices-cli",
   "version": "0.0.0",
-  "private": true,
   "license": "MIT",
   "type": "module",
   "description": "Render invoice JSON to PDF from the command line.",
+  "keywords": [
+    "invoice",
+    "pdf",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vicentesan/invoice.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://invoices.vicente.fyi/",
   "bin": {
-    "invoice": "./src/bin.ts"
+    "invoice": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "start": "bun ./src/bin.ts",
-    "build": "bun ./scripts/build.ts",
-    "build:host": "bun ./scripts/build.ts --host",
+    "build": "bun build ./src/bin.ts --target node --minify --outfile dist/bin.js && mkdir -p dist/fonts && cp ../../packages/shared/src/assets/fonts/Inter-Regular.ttf ../../packages/shared/src/assets/fonts/Inter-SemiBold.ttf ../../packages/shared/src/assets/fonts/OFL.txt dist/fonts/ && cp ../../LICENSE dist/LICENSE",
     "test": "vitest run"
   },
   "devDependencies": {
-    "@effect/platform-bun": "4.1.7",
     "@effect/platform-node": "4.1.7",
     "@effect/vitest": "4.1.7",
     "@invoice/shared": "workspace:*",

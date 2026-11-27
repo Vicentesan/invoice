@@ -17,10 +17,8 @@ the same seed. Run `invoice --help` for every flag.
 Text in the PDF is set in Inter, embedded with a ToUnicode map, so every string copies out exactly. Identifiers such as
 IBANs, SWIFT codes and tax IDs are never broken across lines.
 
-The package installs a prebuilt binary for your platform (macOS, Linux including Alpine, and Windows on x64; macOS
-and Linux on arm64), so nothing else needs to be installed. `npx` and `npm` only need Node.js to start it.
+Requires Node.js 22 or newer.
 
 ## License
 
-MIT. Inter is embedded in the binary and distributed under the SIL Open Font License, included as `OFL.txt` in each
-platform package.
+MIT. Inter is distributed under the SIL Open Font License, included as `dist/fonts/OFL.txt`.

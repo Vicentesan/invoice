@@ -1,12 +1,12 @@
-#!/usr/bin/env bun
-import { BunRuntime, BunServices } from "@effect/platform-bun"
+#!/usr/bin/env node
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { PdfRenderer } from "@invoice/shared/services/PdfRenderer"
 import { Console, Effect, Layer } from "effect"
 import { Command } from "effect/cli"
 import { cli, version } from "./Cli.ts"
-import { layer as fonts } from "./FontsEmbedded.ts"
+import { layer as fonts } from "./FontsOnDisk.ts"
 
-const services = PdfRenderer.layer.pipe(Layer.provide(fonts), Layer.provideMerge(BunServices.layer))
+const services = PdfRenderer.layer.pipe(Layer.provide(fonts), Layer.provideMerge(NodeServices.layer))
 
 cli.pipe(
   Command.run({ version }),
@@ -18,5 +18,5 @@ cli.pipe(
       }))
     )),
   Effect.provide(services),
-  BunRuntime.runMain
+  NodeRuntime.runMain
 )

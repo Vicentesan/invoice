@@ -19,10 +19,9 @@
       "name": "invoices-cli",
       "version": "0.0.0",
       "bin": {
-        "invoice": "./src/bin.ts",
+        "invoice": "./dist/bin.js",
       },
       "devDependencies": {
-        "@effect/platform-bun": "4.1.7",
         "@effect/platform-node": "4.1.7",
         "@effect/vitest": "4.1.7",
         "@invoice/shared": "workspace:*",

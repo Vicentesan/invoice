@@ -54,8 +54,7 @@
                 "effect/FileSystem",
                 "effect/Path",
                 "@effect/vitest",
-                "@effect/platform-bun/BunRuntime",
-                "@effect/platform-bun/BunServices",
+                "@effect/platform-node/NodeRuntime",
                 "@effect/platform-node/NodeServices"
               ]
             }
