@@ -10,7 +10,7 @@ on:
         type: boolean
         default: true
       cli:
-        description: Publish invoices-cli and its platform binaries to npm as latest
+        description: Publish invoices-cli to npm as latest
         type: boolean
         default: true
 
@@ -78,25 +78,19 @@ jobs:
       # Trusted publishing needs npm 11.5.1 or newer.
       - run: npm install --global npm@latest
       - run: bun install --frozen-lockfile
-      # Cross-compiles a self-contained binary for every platform into its own
-      # npm package, plus the small `invoices-cli` package that launches it.
-      - name: Build every platform
+      - name: Build
         working-directory: apps/cli
         run: bun run build
-      # The version to publish is the one in apps/cli/package.json. A package
-      # already on npm at that version is left alone, so the workflow can be
-      # re-run to finish a release that stopped half way, or to redeploy the
-      # website alone. The platform packages go first, so the launcher is never
-      # published pointing at binaries that aren't there yet.
+      # The version to publish is the one in apps/cli/package.json. A version
+      # that is already on npm is left alone, so the workflow can be re-run
+      # to redeploy the website without failing here.
       - name: Publish
-        working-directory: apps/cli/dist/npm
+        working-directory: apps/cli
         run: |
-          version=$(node --print "require('./invoices-cli/package.json').version")
-          for package in invoices-cli-* invoices-cli; do
-            if npm view "$package@$version" version > /dev/null 2>&1; then
-              echo "$package@$version is already on npm; skipped." >> "$GITHUB_STEP_SUMMARY"
-            else
-              (cd "$package" && npm publish --tag latest --access public)
-              echo "Published $package@$version as latest." >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done
+          version=$(node --print "require('./package.json').version")
+          if npm view "invoices-cli@$version" version > /dev/null 2>&1; then
+            echo "invoices-cli@$version is already on npm; skipped." >> "$GITHUB_STEP_SUMMARY"
+          else
+            npm publish --tag latest
+            echo "Published invoices-cli@$version as latest." >> "$GITHUB_STEP_SUMMARY"
+          fi
