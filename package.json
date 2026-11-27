@@ -6,7 +6,8 @@
   "type": "module",
   "packageManager": "bun@1.4.5",
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "dev": "bun run --filter @invoice/web dev",
@@ -14,6 +15,7 @@
     "preview": "bun run --filter @invoice/web preview",
     "deploy": "bun run --filter @invoice/web deploy",
     "deploy:plan": "bun run --filter @invoice/web deploy:plan",
+    "cli": "bun apps/cli/src/bin.ts",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run test",
     "format": "dprint fmt",
     "format:check": "dprint check",

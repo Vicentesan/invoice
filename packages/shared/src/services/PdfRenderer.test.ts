@@ -9,7 +9,7 @@ import { InvoiceFonts } from "./InvoiceFonts.ts"
 import { PdfRenderer, PdfRenderFailure } from "./PdfRenderer.ts"
 
 const fontFile = (name: string) =>
-  Effect.promise(() => readFile(new URL(`../../assets/fonts/${name}`, import.meta.url))).pipe(
+  Effect.promise(() => readFile(new URL(`../assets/fonts/${name}`, import.meta.url))).pipe(
     Effect.map((buffer) => new Uint8Array(buffer))
   )
 
@@ -20,7 +20,7 @@ const fontsFromDisk = Layer.succeed(
   })
 )
 
-const layer = PdfRenderer.layerNoDeps.pipe(Layer.provide(fontsFromDisk))
+const layer = PdfRenderer.layer.pipe(Layer.provide(fontsFromDisk))
 
 /** The text of every page, as a PDF reader's copy would give it: one line per text run. */
 const extractText = (bytes: Uint8Array) =>

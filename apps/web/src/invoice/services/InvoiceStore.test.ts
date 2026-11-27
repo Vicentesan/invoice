@@ -1,5 +1,5 @@
-import * as Invoice from "#domain/Invoice"
 import { describe, expect, it } from "@effect/vitest"
+import * as Invoice from "@invoice/shared/domain/Invoice"
 import { Effect, Layer, Option } from "effect"
 import { InvoiceStore, STORAGE_KEY } from "./InvoiceStore.ts"
 import { Storage } from "./Storage.ts"

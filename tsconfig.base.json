@@ -17,6 +17,7 @@
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "strict": true,
     "target": "ESNext",
@@ -43,6 +44,20 @@
             "include": ["**/*.test.ts"],
             "options": {
               "allowedUnstableApis": ["@effect/vitest"]
+            }
+          },
+          {
+            "include": ["**/apps/cli/src/**/*.ts"],
+            "options": {
+              "allowedUnstableApis": [
+                "effect/cli",
+                "effect/FileSystem",
+                "effect/Path",
+                "@effect/vitest",
+                "@effect/platform-bun/BunRuntime",
+                "@effect/platform-bun/BunServices",
+                "@effect/platform-node/NodeServices"
+              ]
             }
           }
         ]

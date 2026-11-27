@@ -1,8 +1,8 @@
-import * as Invoice from "#domain/Invoice"
-import * as SampleInvoice from "#domain/SampleInvoice"
 import { Component } from "@effect/ui"
 import { Story } from "@effect/ui/testing"
 import { describe, expect, it } from "@effect/vitest"
+import * as Invoice from "@invoice/shared/domain/Invoice"
+import * as SampleInvoice from "@invoice/shared/domain/SampleInvoice"
 import { DateTime, Effect, Option } from "effect"
 import {
   CopyExport,

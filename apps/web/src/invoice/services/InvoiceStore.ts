@@ -1,4 +1,4 @@
-import * as Invoice from "#domain/Invoice"
+import * as Invoice from "@invoice/shared/domain/Invoice"
 import { Context, Effect, Layer, Option } from "effect"
 import { Storage, type StorageError } from "./Storage.ts"
 

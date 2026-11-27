@@ -2,7 +2,6 @@ import type { Invoice } from "#domain/Invoice"
 import { UiSchema } from "@effect/ui"
 import { Context, Effect, Layer, Schema } from "effect"
 import { InvoiceFonts } from "./InvoiceFonts.ts"
-import { layer as bundledFonts } from "./InvoiceFontsBundled.ts"
 
 export const PdfRenderFailure = UiSchema.TaggedEnum({
   /** The Inter font files couldn't be loaded. */
@@ -33,7 +32,8 @@ export class PdfRenderError extends Schema.TaggedError<PdfRenderError>()("PdfRen
 export class PdfRenderer extends Context.Service<PdfRenderer, {
   render(invoice: Invoice): Effect.Effect<Uint8Array, PdfRenderError>
 }>()("app/PdfRenderer") {
-  static readonly layerNoDeps = Layer.effect(
+  /** Needs `InvoiceFonts`: the web app fetches the font files, the CLI reads them from disk. */
+  static readonly layer = Layer.effect(
     PdfRenderer,
     Effect.gen(function*() {
       const fonts = yield* InvoiceFonts
@@ -67,6 +67,4 @@ export class PdfRenderer extends Context.Service<PdfRenderer, {
       return PdfRenderer.of({ render })
     })
   )
-
-  static readonly layer = this.layerNoDeps.pipe(Layer.provide(bundledFonts))
 }

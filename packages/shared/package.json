@@ -1,0 +1,33 @@
+{
+  "name": "@invoice/shared",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": [],
+  "description": "The invoice model and its PDF rendering, shared by the web app and the CLI.",
+  "imports": {
+    "#domain/*": "./src/domain/*.ts"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./domain/*": "./src/domain/*.ts",
+    "./pdf/*": "./src/pdf/*.ts",
+    "./services/*": "./src/services/*.ts",
+    "./fonts/*": "./src/assets/fonts/*"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@effect/ui": "https://pkg.pr.new/Effect-TS/ui/@effect/ui@22128c65",
+    "@pdf-lib/fontkit": "1.1.1",
+    "effect": "4.1.7",
+    "pdf-lib": "1.17.1"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.1.7",
+    "pdfjs-dist": "6.5.438",
+    "vitest": "5.1.2"
+  }
+}

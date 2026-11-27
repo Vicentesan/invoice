@@ -1,8 +1,8 @@
 import { defineConfig } from "vitest/config"
 
-// Each app tests itself with its own Vite config.
+// Each app and package tests itself with its own config.
 export default defineConfig({
   test: {
-    projects: ["apps/*"]
+    projects: ["apps/*", "packages/*"]
   }
 })

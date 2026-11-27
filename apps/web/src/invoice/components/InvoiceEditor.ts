@@ -1,11 +1,12 @@
-import * as Decimal from "#domain/Decimal"
-import * as Invoice from "#domain/Invoice"
-import * as IsoDate from "#domain/IsoDate"
-import * as Money from "#domain/Money"
-import * as SampleInvoice from "#domain/SampleInvoice"
 import { Command, Component, Mount, Subscription, UiSchema } from "@effect/ui"
 import { DatePicker, FileDrop, Select } from "@effect/ui-kit"
 import { Html, HtmlFiles, HtmlSubscription } from "@effect/ui/html"
+import * as Decimal from "@invoice/shared/domain/Decimal"
+import * as Invoice from "@invoice/shared/domain/Invoice"
+import * as IsoDate from "@invoice/shared/domain/IsoDate"
+import * as Money from "@invoice/shared/domain/Money"
+import * as SampleInvoice from "@invoice/shared/domain/SampleInvoice"
+import { PdfRenderer } from "@invoice/shared/services/PdfRenderer"
 import { DateTime, Effect, Layer, Option, Queue, Random, Schema, Stream } from "effect"
 import { CONTROL, Field, FieldGroup, ROW, Section } from "../../components/Field.ts"
 import {
@@ -27,9 +28,9 @@ import {
   PlusIcon,
   UploadIcon
 } from "../../components/Icon.ts"
+import { layer as bundledFonts } from "../services/InvoiceFontsBundled.ts"
 import { InvoiceStore } from "../services/InvoiceStore.ts"
 import { PdfCanvas } from "../services/PdfCanvas.ts"
-import { PdfRenderer } from "../services/PdfRenderer.ts"
 
 const TextField = Schema.Literals(["number", "paymentTerms", "notes"])
 const PartyKey = Schema.Literals(["from", "billTo"])
@@ -1664,7 +1665,7 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
 export const InvoiceEditor = InvoiceEditorNoDeps.pipe(
   Component.provide(
     Layer.mergeAll(SaveInvoice.layer, DownloadPdf.layer, PdfCanvas.layer).pipe(
-      Layer.provideMerge(Layer.mergeAll(InvoiceStore.layer, PdfRenderer.layer))
+      Layer.provideMerge(Layer.mergeAll(InvoiceStore.layer, PdfRenderer.layer.pipe(Layer.provide(bundledFonts))))
     )
   )
 )
