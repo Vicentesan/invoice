@@ -1,26 +1,24 @@
 import { FontLoadError, InvoiceFonts } from "@invoice/shared/services/InvoiceFonts"
-import { Effect, FileSystem, Layer, Path } from "effect"
+import { Effect, FileSystem, Layer } from "effect"
 
-/** Where the shared package keeps a font file, as a URL the module loader resolves. */
-const fontUrl = (name: string): string => import.meta.resolve(`@invoice/shared/fonts/${name}`)
+/**
+ * Inter read from the given files, once per run. The paths differ by how the
+ * CLI runs: the compiled binary carries the fonts inside it, and the tests
+ * read them from the shared package.
+ */
+export const layerFiles = (files: { readonly regular: string; readonly semiBold: string }) =>
+  Layer.effect(
+    InvoiceFonts,
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
 
-/** Inter read from the shared package's files on disk, once per run. */
-export const layer = Layer.effect(
-  InvoiceFonts,
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
+      const read = (file: string) =>
+        fs.readFile(file).pipe(
+          Effect.mapError((cause) => new FontLoadError({ url: file, reason: String(cause) }))
+        )
 
-    const read = (name: string) =>
-      path.fromFileUrl(new URL(fontUrl(name))).pipe(
-        Effect.flatMap((file) => fs.readFile(file)),
-        Effect.mapError((cause) => new FontLoadError({ url: fontUrl(name), reason: String(cause) }))
-      )
+      const load = yield* Effect.cached(Effect.all({ regular: read(files.regular), semiBold: read(files.semiBold) }))
 
-    const load = yield* Effect.cached(
-      Effect.all({ regular: read("Inter-Regular.ttf"), semiBold: read("Inter-SemiBold.ttf") })
-    )
-
-    return InvoiceFonts.of({ load })
-  })
-)
+      return InvoiceFonts.of({ load })
+    })
+  )

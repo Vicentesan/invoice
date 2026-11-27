@@ -1,0 +1,57 @@
+#!/usr/bin/env node
+// The launcher the npm package installs as `invoice`. The real program is a
+// prebuilt binary that lives in a second package, one per platform, which npm
+// installs through `optionalDependencies`. This finds that binary and runs it.
+const { execSync, spawnSync } = require("node:child_process")
+
+const BINARIES = {
+  "darwin-arm64": "invoices-cli-darwin-arm64/invoice",
+  "darwin-x64": "invoices-cli-darwin-x64/invoice",
+  "linux-arm64": "invoices-cli-linux-arm64/invoice",
+  "linux-x64": "invoices-cli-linux-x64/invoice",
+  "linux-arm64-musl": "invoices-cli-linux-arm64-musl/invoice",
+  "linux-x64-musl": "invoices-cli-linux-x64-musl/invoice",
+  "win32-x64": "invoices-cli-win32-x64/invoice.exe"
+}
+
+// Alpine and other musl systems need their own build. `ldd --version` names
+// the C library, on stdout or stderr depending on which one it is.
+const usesMusl = () => {
+  try {
+    return String(execSync("ldd --version", { stdio: ["pipe", "pipe", "pipe"] })).includes("musl")
+  } catch (error) {
+    return String(error.stderr).includes("musl")
+  }
+}
+
+const platform = process.platform === "linux" && usesMusl()
+  ? `linux-${process.arch}-musl`
+  : `${process.platform}-${process.arch}`
+
+const fail = (message) => {
+  process.stderr.write(`invoice: ${message}\n`)
+  process.exit(1)
+}
+
+const binary = BINARIES[platform]
+
+if (binary === undefined) {
+  fail(`there is no prebuilt binary for ${platform}.`)
+}
+
+let path
+
+try {
+  path = require.resolve(binary)
+} catch {
+  fail(
+    `the binary for ${platform} isn't installed. It comes as an optional dependency, ` +
+      "so reinstall without --no-optional or --omit=optional."
+  )
+}
+
+const result = spawnSync(path, process.argv.slice(2), { stdio: "inherit" })
+
+if (result.error) throw result.error
+
+process.exit(result.status ?? 1)

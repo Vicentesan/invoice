@@ -21,14 +21,12 @@
       "bin": {
         "invoice": "./src/bin.ts",
       },
-      "dependencies": {
-        "@effect/platform-bun": "4.1.7",
-        "@invoice/shared": "workspace:*",
-        "effect": "4.1.7",
-      },
       "devDependencies": {
+        "@effect/platform-bun": "4.1.7",
         "@effect/platform-node": "4.1.7",
         "@effect/vitest": "4.1.7",
+        "@invoice/shared": "workspace:*",
+        "effect": "4.1.7",
         "pdfjs-dist": "6.5.438",
         "vitest": "5.1.2",
       },

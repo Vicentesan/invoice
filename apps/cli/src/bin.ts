@@ -4,7 +4,7 @@ import { PdfRenderer } from "@invoice/shared/services/PdfRenderer"
 import { Console, Effect, Layer } from "effect"
 import { Command } from "effect/cli"
 import { cli, version } from "./Cli.ts"
-import { layer as fonts } from "./Fonts.ts"
+import { layer as fonts } from "./FontsEmbedded.ts"
 
 const services = PdfRenderer.layer.pipe(Layer.provide(fonts), Layer.provideMerge(BunServices.layer))
 

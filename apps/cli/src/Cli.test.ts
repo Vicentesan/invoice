@@ -5,9 +5,14 @@ import * as SampleInvoice from "@invoice/shared/domain/SampleInvoice"
 import { PdfRenderer } from "@invoice/shared/services/PdfRenderer"
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { Command } from "effect/cli"
+import { fileURLToPath } from "node:url"
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs"
 import { cli, InvoiceCliError, version } from "./Cli.ts"
-import { layer as fonts } from "./Fonts.ts"
+import { layerFiles } from "./Fonts.ts"
+
+const fontFile = (name: string) => fileURLToPath(import.meta.resolve(`@invoice/shared/fonts/${name}`))
+
+const fonts = layerFiles({ regular: fontFile("Inter-Regular.ttf"), semiBold: fontFile("Inter-SemiBold.ttf") })
 
 const services = PdfRenderer.layer.pipe(Layer.provide(fonts), Layer.provideMerge(NodeServices.layer))
 

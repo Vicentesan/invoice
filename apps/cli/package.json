@@ -4,22 +4,22 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "Renders invoice JSON to PDF from the command line.",
+  "description": "Render invoice JSON to PDF from the command line.",
   "bin": {
     "invoice": "./src/bin.ts"
   },
   "scripts": {
     "start": "bun ./src/bin.ts",
+    "build": "bun ./scripts/build.ts",
+    "build:host": "bun ./scripts/build.ts --host",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@effect/platform-bun": "4.1.7",
-    "@invoice/shared": "workspace:*",
-    "effect": "4.1.7"
-  },
   "devDependencies": {
+    "@effect/platform-bun": "4.1.7",
     "@effect/platform-node": "4.1.7",
     "@effect/vitest": "4.1.7",
+    "@invoice/shared": "workspace:*",
+    "effect": "4.1.7",
     "pdfjs-dist": "6.5.438",
     "vitest": "5.1.2"
   }
