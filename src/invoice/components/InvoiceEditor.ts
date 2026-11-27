@@ -2,20 +2,30 @@ import * as Decimal from "#domain/Decimal"
 import * as Invoice from "#domain/Invoice"
 import * as IsoDate from "#domain/IsoDate"
 import * as Money from "#domain/Money"
+import * as SampleInvoice from "#domain/SampleInvoice"
 import { Command, Component, Mount, Subscription, UiSchema } from "@effect/ui"
-import { DatePicker, Select } from "@effect/ui-kit"
+import { DatePicker, FileDrop, Select } from "@effect/ui-kit"
 import { Html, HtmlFiles, HtmlSubscription } from "@effect/ui/html"
-import { DateTime, Effect, Layer, Option, Schema, Stream } from "effect"
+import { DateTime, Effect, Layer, Option, Queue, Random, Schema, Stream } from "effect"
 import { CONTROL, Field, FieldGroup, ROW, Section } from "../../components/Field.ts"
 import {
   CalendarIcon,
+  CalendarPlusIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronUpIcon,
   CloseIcon,
-  PlusIcon
+  CopyIcon,
+  DiceIcon,
+  DownloadIcon,
+  ExportIcon,
+  EyeIcon,
+  ImportIcon,
+  PageIcon,
+  PlusIcon,
+  UploadIcon
 } from "../../components/Icon.ts"
 import { InvoiceStore } from "../services/InvoiceStore.ts"
 import { PdfCanvas } from "../services/PdfCanvas.ts"
@@ -27,7 +37,10 @@ const PartyField = Schema.Literals(["name", "country", "taxIdLabel", "taxId"])
 const DateField = Schema.Literals(["issueDate", "dueDate"])
 
 /** The popups of the form. One is open at a time. */
-const Popup = Schema.Literals(["dueTerms", "issueDate", "dueDate", "paymentLabels"])
+const Popup = Schema.Literals(["dueTerms", "issueDate", "dueDate", "paymentLabels", "pageSize"])
+
+/** The dialogs of the page. One is open at a time. */
+const Dialog = Schema.Literals(["import", "export"])
 
 /** What the preview pane shows: nothing yet, the pages of the last render, or why it failed. */
 export const Preview = UiSchema.TaggedEnum({
@@ -66,12 +79,26 @@ export const InvoiceEditorMessage = UiSchema.TaggedEnum({
   ClickedMovePaymentFieldUp: { index: Schema.Number },
   ClickedMovePaymentFieldDown: { index: Schema.Number },
   PickedPageSize: { pageSize: Invoice.PageSize },
+  ClickedPageSizeCommand: {},
   ClickedDuplicate: {},
+  ClickedSampleData: {},
+  CompletedDrawSeed: { seed: Schema.Number },
+  ClickedExitDemo: {},
   ClickedDownloadPdf: {},
   SucceededDownloadPdf: {},
   FailedDownloadPdf: { reason: Schema.String },
+  ClickedImportJson: {},
   ClickedExportJson: {},
+  RequestedCloseDialog: {},
+  ClosedDialog: { dialog: Dialog },
+  UpdatedImportText: { value: Schema.String },
+  SubmittedImport: {},
   ChoseImportFiles: { files: Schema.Array(Schema.instanceOf(File)) },
+  RejectedImportFiles: {},
+  ClickedCopyExport: {},
+  SucceededCopyExport: {},
+  FailedCopyExport: {},
+  ClickedDownloadExport: {},
   SucceededReadImport: { invoice: Invoice.Invoice },
   FailedReadImport: { name: Schema.String, reason: Schema.String },
   RequestedSave: {},
@@ -100,7 +127,20 @@ export const InvoiceEditorModel = Schema.Struct({
   /** The value of `edits` that the last successful save wrote. */
   savedEdits: Schema.Number,
   preview: Preview,
-  notice: Schema.NullOr(Schema.String)
+  notice: Schema.NullOr(Schema.String),
+  /**
+   * Demo mode. While it is on the invoice on screen is sample data, nothing
+   * is saved, and this holds the user's own invoice to put back on the way out.
+   */
+  demo: Schema.NullOr(Schema.Struct({ own: Invoice.Invoice })),
+  /** The import or export dialog that is open, if either. */
+  dialog: Schema.NullOr(Dialog),
+  /** What has been pasted into the import dialog. */
+  importText: Schema.String,
+  /** Why the last import or copy failed, shown inside the dialog. */
+  dialogError: Schema.NullOr(Schema.String),
+  /** Whether the exported JSON has just been copied. */
+  copied: Schema.Boolean
 })
 
 export type InvoiceEditorModel = typeof InvoiceEditorModel.Type
@@ -168,6 +208,40 @@ export const ExportJson = Command.make(
     )
 )
 
+// Randomness is an effect, so the seed for a sample invoice is drawn in a Command.
+export const DrawSeed = Command.make(
+  "invoice/DrawSeed",
+  {},
+  () =>
+    Random.nextIntBetween(1, 2_000_000_000).pipe(
+      Effect.map((seed) => InvoiceEditorMessage.CompletedDrawSeed({ seed }))
+    )
+)
+
+export const ParseImport = Command.make(
+  "invoice/ParseImport",
+  { args: { json: Schema.String }, mode: "switch" },
+  ({ json }) =>
+    Invoice.fromJson(json).pipe(
+      Effect.match({
+        onSuccess: (invoice) => InvoiceEditorMessage.SucceededReadImport({ invoice }),
+        onFailure: (error) => InvoiceEditorMessage.FailedReadImport({ name: "The pasted text", reason: error.reason })
+      })
+    )
+)
+
+export const CopyExport = Command.make(
+  "invoice/CopyExport",
+  { args: { json: Schema.String } },
+  ({ json }) =>
+    Effect.tryPromise(() => globalThis.navigator.clipboard.writeText(json)).pipe(
+      Effect.match({
+        onSuccess: () => InvoiceEditorMessage.SucceededCopyExport(),
+        onFailure: () => InvoiceEditorMessage.FailedCopyExport()
+      })
+    )
+)
+
 export const ReadImport = Command.make(
   "invoice/ReadImport",
   { args: { file: Schema.instanceOf(File) }, mode: "switch" },
@@ -186,7 +260,8 @@ export const ReadImport = Command.make(
 // The preview mount
 // ---------------------------------------------------------------------------
 
-const PREVIEW_DELAY = "150 millis"
+// How long the page-size switch takes to slide. It matches the transition in styles.css.
+const SWITCH_SLIDE = "200 millis"
 
 const drawPreview = Effect.fn("drawPreview")(function*(node: HTMLElement, invoice: Invoice.Invoice) {
   const renderer = yield* PdfRenderer
@@ -218,20 +293,93 @@ const viewportChanges = (node: HTMLElement): Stream.Stream<void> => {
 }
 
 /**
- * Renders the invoice to a PDF and paints its pages into the element, again
- * each time the invoice holds still for a moment or the viewport changes. A
- * render still running by then is dropped. What is on screen is the PDF
- * itself, the same bytes a download gets.
+ * Renders the invoice to a PDF and paints its pages into the element, at once
+ * and again on every change to the invoice or the viewport. Renders never
+ * overlap: changes that arrive while one is running collapse into the latest,
+ * which is rendered next, so the preview keeps up with typing without a wait
+ * before it starts. What is on screen is the PDF itself, the same bytes a
+ * download gets.
  */
 export const DrawPreview = Mount.makeStream(
   "DrawPreview",
   { args: { invoice: Invoice.Invoice } },
-  (node: HTMLElement, _args, changes) =>
-    changes.pipe(
+  (node: HTMLElement, _args, changes) => {
+    let pageSize: Invoice.PageSize | undefined
+
+    return changes.pipe(
       Stream.zipLatest(Stream.concat(Stream.succeed(undefined), viewportChanges(node))),
-      Stream.debounce(PREVIEW_DELAY),
-      Stream.switchMap(([{ invoice }]) => Stream.fromEffect(drawPreview(node, invoice)))
+      Stream.buffer({ capacity: 1, strategy: "sliding" }),
+      Stream.mapEffect(([{ invoice }]) => {
+        // A new page size comes from the switch, whose thumb gets to finish its slide first.
+        const settle = pageSize !== undefined && pageSize !== invoice.pageSize
+          ? Effect.sleep(SWITCH_SLIDE)
+          : Effect.void
+
+        pageSize = invoice.pageSize
+
+        return Effect.andThen(settle, drawPreview(node, invoice))
+      })
     )
+  }
+)
+
+/** Emits once at the start and again whenever the element changes size, such as when a web font arrives. */
+const sizeChanges = (node: HTMLElement): Stream.Stream<void> =>
+  Stream.callback<void>((queue) =>
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        const observer = new ResizeObserver(() => Queue.offerUnsafe(queue, undefined))
+
+        observer.observe(node)
+
+        return observer
+      }),
+      (observer) => Effect.sync(() => observer.disconnect())
+    )
+  )
+
+/**
+ * Keeps the thumb of a segmented control over the pressed segment. The
+ * segments keep their own widths, so the thumb's edges are measured and
+ * handed to CSS as custom properties, which a `clip-path` transition follows.
+ * Only a change of segment slides: the first placement, and one after the
+ * control changed size, are applied with the transition off.
+ */
+export const TrackThumb = Mount.makeStream(
+  "TrackThumb",
+  { args: { pressed: Schema.String } },
+  (node: HTMLElement, _args, changes) => {
+    let placed: string | undefined
+
+    return changes.pipe(
+      Stream.zipLatest(sizeChanges(node)),
+      Stream.map(([{ pressed }]) => {
+        const segment = node.querySelector<HTMLElement>("[aria-pressed=\"true\"]")
+        const thumb = node.querySelector<HTMLElement>("[data-thumb]")
+
+        if (segment === null || thumb === null) return
+
+        const track = thumb.getBoundingClientRect()
+        const target = segment.getBoundingClientRect()
+        const slides = placed !== undefined && placed !== pressed
+
+        if (!slides) thumb.style.transition = "none"
+
+        node.style.setProperty("--thumb-start", `${target.left - track.left}px`)
+        node.style.setProperty("--thumb-end", `${track.right - target.right}px`)
+        node.setAttribute("data-tracking", "")
+
+        if (!slides) {
+          // Reading layout applies the new clip before the transition comes back.
+          thumb.getBoundingClientRect()
+          thumb.style.transition = ""
+        }
+
+        placed = pressed
+      }),
+      Stream.drain
+    )
+  }
 )
 
 // ---------------------------------------------------------------------------
@@ -279,6 +427,10 @@ const typed = (
     onNone: () => ({ ...model, draft: { field, text, valid: false } }),
     onSome: (invoice) => ({ ...edited(model, invoice), draft: { field, text, valid: true } })
   })
+
+/** Leaves demo mode and puts the user's own invoice back. */
+const exitDemo = (model: InvoiceEditorModel): InvoiceEditorModel =>
+  model.demo === null ? model : { ...replaced(model, model.demo.own), demo: null }
 
 /** An emptied amount or rate means zero. */
 const parseOptional = (text: string, scale: number): Option.Option<number> =>
@@ -347,6 +499,20 @@ const pickedDate = InvoiceEditorDef.update("PickedDate", ($, { date, field }) =>
 const choseImportFiles = InvoiceEditorDef.update(
   "ChoseImportFiles",
   ($, { files: [file] }) => file === undefined ? $.model : $.run(ReadImport.make({ file }))
+)
+
+const submittedImport = InvoiceEditorDef.update(
+  "SubmittedImport",
+  ($) => $.model.importText.trim() === "" ? $.model : $.run(ParseImport.make({ json: $.model.importText }))
+)
+
+const clickedCopyExport = InvoiceEditorDef.update(
+  "ClickedCopyExport",
+  ($) =>
+    Option.match(Invoice.toJsonText($.model.invoice), {
+      onNone: () => $.model,
+      onSome: (json) => $.run(CopyExport.make({ json }))
+    })
 )
 
 const requestedSave = InvoiceEditorDef.update(
@@ -731,6 +897,12 @@ const RowActions = InvoiceEditorDef.fragment((h, options: {
   )
 ])
 
+const PRIMARY_BUTTON =
+  `cursor-pointer rounded-full bg-primary px-4 py-2 text-[13px] font-medium text-white outline-none ${PRESS} hover:opacity-85 focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-offset-2 disabled:cursor-default disabled:opacity-40 disabled:hover:opacity-40`
+
+const SECONDARY_BUTTON =
+  `cursor-pointer rounded-full px-4 py-2 text-[13px] font-medium text-primary shadow-[inset_0_0_0_1px_var(--color-line)] outline-none ${PRESS} hover:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-primary/25`
+
 const QUIET_BUTTON =
   "cursor-pointer text-[13px] text-muted-foreground hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
 
@@ -923,53 +1095,325 @@ const PaymentFields = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =
   )
 })
 
-const Actions = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
-  h.div.class("flex flex-wrap items-center justify-between gap-x-6 gap-y-3").children(
-    h.div
-      .class("flex rounded-full border border-line bg-white p-0.5 text-[13px]")
-      .attrs({ role: "group", "aria-label": "Page size" })
-      .children(
-        Invoice.PageSize.literals.map((pageSize) =>
-          h.button
-            .key(pageSize)
-            .attrs({ type: "button", "aria-pressed": String(model.invoice.pageSize === pageSize) })
-            .class(
-              "cursor-pointer rounded-full px-3 py-1 focus-visible:outline-2 focus-visible:outline-primary",
-              model.invoice.pageSize === pageSize
-                ? "bg-primary text-white"
-                : "text-muted-foreground hover:text-primary"
-            )
-            .on("click", InvoiceEditorMessage.PickedPageSize({ pageSize }))
-            .children(pageSize === "Letter" ? "US Letter" : pageSize)
+const pageSizeLabel = (pageSize: Invoice.PageSize): string => pageSize === "Letter" ? "US Letter" : pageSize
+
+// Shared by a segment and its copy inside the thumb, so the two line up exactly.
+const SEGMENT = "px-3 py-1 text-center whitespace-nowrap"
+
+/**
+ * A segmented control with a sliding thumb. The thumb is a dark copy of the
+ * labels laid exactly over them and clipped to the pressed segment, so each
+ * label turns white as the thumb's edge passes it. Moving the clip is paint
+ * only: nothing is laid out again while it slides.
+ */
+const PageSizeSwitch = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
+  h.div
+    .class("segmented relative inline-flex rounded-full border border-line bg-white p-0.5 text-[13px]")
+    .attrs({ role: "group", "aria-label": "Page size" })
+    .onMount(TrackThumb({ pressed: model.invoice.pageSize }))
+    .children(
+      Invoice.PageSize.literals.map((pageSize) =>
+        h.button
+          .key(pageSize)
+          .attrs({ type: "button", "aria-pressed": String(model.invoice.pageSize === pageSize) })
+          .class(
+            SEGMENT,
+            "cursor-pointer rounded-full text-muted-foreground outline-none hover:text-primary",
+            "focus-visible:ring-2 focus-visible:ring-primary/25 [-webkit-tap-highlight-color:transparent]"
+          )
+          .on("click", InvoiceEditorMessage.PickedPageSize({ pageSize }))
+          .children(pageSizeLabel(pageSize))
+      ),
+      h.div
+        .attrs({ "aria-hidden": "true", "data-thumb": "" })
+        .class("segmented-thumb pointer-events-none absolute inset-0.5 flex bg-primary text-white")
+        .children(
+          Invoice.PageSize.literals.map((pageSize) =>
+            h.span.key(pageSize).class(SEGMENT).children(pageSizeLabel(pageSize))
+          )
         )
-      ),
+    )
+)
+
+const sampleLabel = (model: InvoiceEditorModel): string => model.demo === null ? "Sample data" : "Exit demo"
+
+const DownloadButton = InvoiceEditorDef.fragment((h) =>
+  h.button
+    .attr("type", "button")
+    .class(PRIMARY_BUTTON)
+    .on("click", InvoiceEditorMessage.ClickedDownloadPdf())
+    .children(h.isRunning(DownloadPdf) ? "Preparing…" : "Download PDF")
+)
+
+/** The commands, across the top of the preview on a wide screen. A small screen gets `CommandDock` instead. */
+const Actions = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
+  h.div.class("flex flex-wrap items-center justify-between gap-x-6 gap-y-3 max-lg:hidden").children(
+    PageSizeSwitch(h, model),
     h.div.class("flex flex-wrap items-center gap-x-5 gap-y-3").children(
-      h.label.class(QUIET_BUTTON, "focus-within:text-primary").children(
-        "Import JSON",
-        h.input.attrs({ type: "file", accept: ".json,application/json" }).class("sr-only").value("")
-          .on("change", ({ files }) => InvoiceEditorMessage.ChoseImportFiles({ files }))
-      ),
+      h.button.attr("type", "button").class(QUIET_BUTTON).on("click", InvoiceEditorMessage.ClickedImportJson())
+        .children("Import JSON"),
       h.button.attr("type", "button").class(QUIET_BUTTON).on("click", InvoiceEditorMessage.ClickedExportJson())
         .children("Export JSON"),
       h.button.attr("type", "button").class(QUIET_BUTTON).on("click", InvoiceEditorMessage.ClickedDuplicate())
         .children("Duplicate for next month"),
-      h.button
-        .attr("type", "button")
-        .class(
-          "cursor-pointer rounded-full bg-primary px-4 py-2 text-[13px] font-medium text-white",
-          PRESS,
-          "hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-        )
-        .on("click", InvoiceEditorMessage.ClickedDownloadPdf())
-        .children(h.isRunning(DownloadPdf) ? "Preparing…" : "Download PDF")
+      h.button.attr("type", "button").class(QUIET_BUTTON).on("click", InvoiceEditorMessage.ClickedSampleData())
+        .children(sampleLabel(model)),
+      DownloadButton(h)
     )
   )
 )
 
+const DOCK = "rounded-2xl bg-primary shadow-[0_0_0_1px_rgb(255_255_255/8%)_inset,0_8px_24px_-4px_rgb(0_0_0/35%)]"
+
+const DOCK_BUTTON =
+  `flex h-9 min-w-9 cursor-pointer items-center justify-center gap-1.5 rounded-xl px-2 text-white/75 outline-none ${PRESS} hover:bg-white/10 hover:text-white focus-visible:bg-white/15 focus-visible:text-white active:bg-white/15 [-webkit-tap-highlight-color:transparent]`
+
+/**
+ * The commands on a small screen: a dock floating over the bottom edge, in
+ * reach of a thumb wherever the page is scrolled. Each command is an icon
+ * with its name as the label a screen reader and a long press give. The page
+ * size opens a smaller dock of its own, just above, with the two sizes.
+ */
+const CommandDock = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) => {
+  const sample = sampleLabel(model)
+  const choosingSize = model.popup === "pageSize"
+
+  return [
+    // A press anywhere else puts the page-size dock away.
+    choosingSize &&
+    h.div
+      .class("fixed inset-0 z-20 lg:hidden")
+      .on("click", InvoiceEditorMessage.RequestedClosePopup({ popup: "pageSize" })),
+    h.nav
+      .attr("aria-label", "Commands")
+      .class(
+        "fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 p-1.5 lg:hidden",
+        DOCK
+      )
+      .children(
+        h.a
+          .attrs({ href: "#preview", "aria-label": "Preview", title: "Preview" })
+          .class(DOCK_BUTTON)
+          .children(EyeIcon(h, 18)),
+        h.button
+          .attrs({ type: "button", "aria-label": "Import JSON", title: "Import JSON" })
+          .class(DOCK_BUTTON)
+          .on("click", InvoiceEditorMessage.ClickedImportJson())
+          .children(ImportIcon(h, 18)),
+        h.button
+          .attrs({ type: "button", "aria-label": "Export JSON", title: "Export JSON" })
+          .class(DOCK_BUTTON)
+          .on("click", InvoiceEditorMessage.ClickedExportJson())
+          .children(ExportIcon(h, 18)),
+        h.button
+          .attrs({ type: "button", "aria-label": "Duplicate for next month", title: "Duplicate for next month" })
+          .class(DOCK_BUTTON)
+          .on("click", InvoiceEditorMessage.ClickedDuplicate())
+          .children(CalendarPlusIcon(h, 18)),
+        h.button
+          .attrs({ type: "button", "aria-label": sample, "aria-pressed": String(model.demo !== null), title: sample })
+          .class(DOCK_BUTTON, model.demo !== null && "bg-white/15 !text-amber-300")
+          .on("click", InvoiceEditorMessage.ClickedSampleData())
+          .children(DiceIcon(h, 18)),
+        h.div.class("relative").children(
+          h.button
+            .attrs({
+              type: "button",
+              "aria-label": `Page size: ${pageSizeLabel(model.invoice.pageSize)}`,
+              "aria-expanded": String(choosingSize),
+              title: "Page size"
+            })
+            .class(DOCK_BUTTON, choosingSize && "bg-white/15 !text-white")
+            .on("click", InvoiceEditorMessage.ClickedPageSizeCommand())
+            .children(PageIcon(h, 18)),
+          choosingSize &&
+            h.div
+              .attrs({ role: "group", "aria-label": "Page size" })
+              .class(
+                "absolute bottom-full left-1/2 mb-3 flex -translate-x-1/2 gap-0.5 p-1 text-[13px] font-medium whitespace-nowrap",
+                DOCK,
+                "rounded-xl transition-[opacity,translate] duration-150 ease-out motion-reduce:transition-none starting:translate-y-1 starting:opacity-0"
+              )
+              .children(
+                Invoice.PageSize.literals.map((pageSize) =>
+                  h.button
+                    .key(pageSize)
+                    .attrs({ type: "button", "aria-pressed": String(model.invoice.pageSize === pageSize) })
+                    .class(
+                      "cursor-pointer rounded-lg px-3 py-1.5 outline-none focus-visible:bg-white/15 [-webkit-tap-highlight-color:transparent]",
+                      PRESS,
+                      model.invoice.pageSize === pageSize ? "bg-white/15 text-white" : "text-white/70 hover:text-white"
+                    )
+                    .on("click", InvoiceEditorMessage.PickedPageSize({ pageSize }))
+                    .children(pageSizeLabel(pageSize))
+                )
+              )
+        ),
+        h.button
+          .attrs({ type: "button", "aria-label": "Download PDF", title: "Download PDF" })
+          .class(DOCK_BUTTON, "bg-white/15 text-white")
+          .on("click", InvoiceEditorMessage.ClickedDownloadPdf())
+          .children(DownloadIcon(h, 18))
+      )
+  ]
+})
+
+// `closedby="any"` on a dialog makes a press on its backdrop a close request, sent as `cancel` like Escape.
+const DIALOG =
+  "m-auto w-[min(36rem,calc(100vw-2rem))] rounded-2xl bg-white p-6 text-primary shadow-[0_0_0_1px_rgb(0_0_0/7%),0_24px_60px_-12px_rgb(0_0_0/25%)] outline-none backdrop:bg-black/25 transition-[opacity,scale] duration-150 ease-out motion-reduce:transition-none starting:scale-[0.97] starting:opacity-0"
+
+const CODE = "rounded-xl bg-neutral-100 p-3 font-mono text-[12px] leading-relaxed text-primary outline-none"
+
+const DialogError = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
+  model.dialogError !== null &&
+  h.p.class("text-[13px] text-pretty text-danger").attr("role", "alert").children(model.dialogError)
+)
+
+const IMPORT_TYPES = [".json", "application/json"]
+
+// The whole dialog takes a dropped file; the dashed zone says so and lights up while one is dragged over.
+const ImportDialog = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
+  h.dialog
+    .class(DIALOG)
+    .attrs({ "aria-label": "Import JSON", closedby: "any" })
+    .modal(model.dialog === "import")
+    .on("cancel", InvoiceEditorMessage.RequestedCloseDialog())
+    .on("close", InvoiceEditorMessage.ClosedDialog({ dialog: "import" }))
+    .children(
+      FileDrop(h, {
+        props: { accept: IMPORT_TYPES },
+        onEmit: {
+          Picked: ({ files }) => InvoiceEditorMessage.ChoseImportFiles({ files }),
+          Rejected: () => InvoiceEditorMessage.RejectedImportFiles()
+        },
+        view: (fileDrop) =>
+          fileDrop.root(
+            h.form.class("group flex flex-col gap-4").on("submit", InvoiceEditorMessage.SubmittedImport())
+          ).children(
+            h.div.class("flex flex-col gap-1").children(
+              h.h2.class("text-[17px] font-semibold tracking-tight").children("Import JSON"),
+              h.p.class("text-[13px] text-pretty text-muted-foreground").children(
+                "Paste an invoice exported from this app, or drop its file. It replaces the invoice on screen."
+              )
+            ),
+            h.textarea
+              .attrs({
+                "aria-label": "Invoice JSON",
+                rows: "10",
+                placeholder: "{ \"number\": \"INV-0001\", … }",
+                spellcheck: "false"
+              })
+              .class(
+                CODE,
+                "resize-none placeholder:text-placeholder focus-visible:ring-2 focus-visible:ring-primary/25"
+              )
+              .value(model.importText)
+              .on("input", ({ value }) => InvoiceEditorMessage.UpdatedImportText({ value })),
+            h.div
+              .class(
+                "flex items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-300 px-4 py-5 text-[13px] text-muted-foreground",
+                "group-data-[drag-over]:border-primary group-data-[drag-over]:bg-neutral-100 group-data-[drag-over]:text-primary"
+              )
+              .children(
+                UploadIcon(h),
+                h.span("Drop a .json file here, or"),
+                fileDrop.trigger(
+                  h.button.class(
+                    "cursor-pointer rounded-sm font-medium text-primary underline decoration-neutral-300 underline-offset-4 outline-none hover:decoration-primary focus-visible:ring-2 focus-visible:ring-primary/25"
+                  )
+                ).children("browse")
+              ),
+            DialogError(h, model),
+            h.div.class("flex items-center justify-end gap-2").children(
+              h.button.attr("type", "button").class(SECONDARY_BUTTON)
+                .on("click", InvoiceEditorMessage.RequestedCloseDialog())
+                .children("Cancel"),
+              h.button.attr("type", "submit").class(PRIMARY_BUTTON).disabled(model.importText.trim() === "")
+                .children("Import")
+            )
+          )
+      })
+    )
+)
+
+const ExportDialog = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
+  h.dialog
+    .class(DIALOG)
+    .attrs({ "aria-label": "Export JSON", closedby: "any" })
+    .modal(model.dialog === "export")
+    .on("cancel", InvoiceEditorMessage.RequestedCloseDialog())
+    .on("close", InvoiceEditorMessage.ClosedDialog({ dialog: "export" }))
+    .children(
+      h.div.class("flex flex-col gap-4").children(
+        h.div.class("flex flex-col gap-1").children(
+          h.h2.class("text-[17px] font-semibold tracking-tight").children("Export JSON"),
+          h.p.class("text-[13px] text-pretty text-muted-foreground").children(
+            "The whole invoice as JSON. Import it later to pick up where you left off."
+          )
+        ),
+        h.div.class("relative").children(
+          // Rendered only while open, so a closed dialog costs nothing per keystroke.
+          h.pre
+            .attrs({ tabindex: "0", "aria-label": "Invoice JSON" })
+            .class(
+              CODE,
+              "max-h-80 overflow-auto whitespace-pre select-all focus-visible:ring-2 focus-visible:ring-primary/25"
+            )
+            .children(model.dialog === "export" ? Option.getOrElse(Invoice.toJsonText(model.invoice), () => "") : ""),
+          h.button
+            .attrs({
+              type: "button",
+              "aria-label": model.copied ? "Copied" : "Copy",
+              title: model.copied ? "Copied" : "Copy"
+            })
+            .class(
+              GHOST_BUTTON,
+              "absolute top-2 right-2 size-8 bg-white shadow-[0_0_0_1px_rgb(0_0_0/7%)] hover:bg-white"
+            )
+            .on("click", InvoiceEditorMessage.ClickedCopyExport())
+            .children(model.copied ? CheckIcon(h) : CopyIcon(h))
+        ),
+        DialogError(h, model),
+        h.div.class("flex flex-wrap items-center justify-end gap-2").children(
+          h.button.attr("type", "button").class(SECONDARY_BUTTON)
+            .on("click", InvoiceEditorMessage.ClickedDownloadExport())
+            .children("Export to file"),
+          h.button.attr("type", "button").class(PRIMARY_BUTTON)
+            .on("click", InvoiceEditorMessage.RequestedCloseDialog())
+            .children("Close")
+        )
+      )
+    )
+)
+
+const DemoBanner = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
+  model.demo !== null &&
+  h.div
+    .class(
+      // On a small screen the whole page scrolls, so the banner sticks to the top to stay in view.
+      "sticky top-0 z-20 flex items-center justify-between gap-x-4 gap-y-1 border-b border-amber-200 bg-amber-50 px-6 py-2.5 text-[13px] text-amber-900 sm:justify-center"
+    )
+    .attr("role", "status")
+    .children(
+      h.p.class("text-pretty").children(
+        h.strong.class("font-semibold").children("Demo mode."),
+        " Sample data, nothing is saved.",
+        h.span.class("max-sm:hidden").children(" Your own invoice comes back when you exit.")
+      ),
+      h.button
+        .attr("type", "button")
+        .class(
+          "shrink-0 cursor-pointer rounded-sm font-medium underline decoration-amber-400 underline-offset-4 outline-none hover:decoration-amber-900 focus-visible:ring-2 focus-visible:ring-amber-900/30"
+        )
+        .on("click", InvoiceEditorMessage.ClickedExitDemo())
+        .children("Exit demo")
+    )
+)
+
 const PreviewPane = InvoiceEditorDef.fragment((h, model: InvoiceEditorModel) =>
   h.aside
-    .class("dotted flex min-w-0 flex-1 flex-col gap-8 px-6 py-6 lg:h-dvh lg:overflow-y-auto lg:px-10")
-    .attr("aria-label", "PDF preview")
+    .class("dotted flex min-w-0 flex-1 scroll-mt-12 flex-col gap-8 px-6 py-6 lg:h-full lg:overflow-y-auto lg:px-10")
+    .attrs({ "aria-label": "PDF preview", id: "preview" })
     .children(
       Actions(h, model),
       h.div.class("mx-auto flex w-full max-w-[640px] flex-col gap-4 pb-10").children(
@@ -1009,7 +1453,12 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
     edits: 0,
     savedEdits: 0,
     preview: Preview.Pending(),
-    notice: $.props.initialNotice
+    notice: $.props.initialNotice,
+    demo: null,
+    dialog: null,
+    importText: "",
+    dialogError: null,
+    copied: false
   }),
   update: {
     UpdatedText: ($, { field, value }) => edited($.model, { ...$.model.invoice, [field]: value }),
@@ -1018,7 +1467,8 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
     UpdatedPartyAddress: ($, { party, value }) =>
       edited($.model, {
         ...$.model.invoice,
-        [party]: { ...$.model.invoice[party], addressLines: value.split("\n") }
+        // An emptied box is no lines at all, not one empty line.
+        [party]: { ...$.model.invoice[party], addressLines: value === "" ? [] : value.split("\n") }
       }),
     RequestedOpenPopup: requestedOpenPopup,
     // A close request for a popup that another has already replaced changes nothing.
@@ -1086,16 +1536,52 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
     ClickedRemovePaymentField: ($, { index }) => edited($.model, Invoice.removePaymentField($.model.invoice, index)),
     ClickedMovePaymentFieldUp: ($, { index }) => edited($.model, Invoice.movePaymentField($.model.invoice, index, -1)),
     ClickedMovePaymentFieldDown: ($, { index }) => edited($.model, Invoice.movePaymentField($.model.invoice, index, 1)),
-    PickedPageSize: ($, { pageSize }) => edited($.model, { ...$.model.invoice, pageSize }),
+    // Picking in the dock's own little menu also puts that menu away.
+    PickedPageSize: ($, { pageSize }) => ({
+      ...edited($.model, { ...$.model.invoice, pageSize }),
+      popup: $.model.popup === "pageSize" ? null : $.model.popup
+    }),
+    ClickedPageSizeCommand: ($) => $.evolve({ popup: $.model.popup === "pageSize" ? null : "pageSize" }),
     ClickedDuplicate: ($) => replaced($.model, Invoice.duplicateForNextMonth($.model.invoice)),
+    // The button is a toggle: it enters demo mode, and pressed again it leaves.
+    ClickedSampleData: ($) => $.model.demo === null ? $.run(DrawSeed.make()) : exitDemo($.model),
+    // Entering sets the user's own invoice aside, to put back on the way out.
+    CompletedDrawSeed: ($, { seed }) => ({
+      ...replaced($.model, SampleInvoice.make($.props.today, seed)),
+      demo: $.model.demo ?? { own: $.model.invoice }
+    }),
+    ClickedExitDemo: ($) => exitDemo($.model),
     ClickedDownloadPdf: ($) => $.run(DownloadPdf.make({ invoice: $.model.invoice })),
     SucceededDownloadPdf: ($) => $.evolve({ notice: null }),
     FailedDownloadPdf: ($, { reason }) => $.evolve({ notice: reason }),
-    ClickedExportJson: ($) => $.run(ExportJson.make({ invoice: $.model.invoice })),
+    ClickedImportJson: ($) => $.evolve({ dialog: "import", importText: "", dialogError: null }),
+    ClickedExportJson: ($) => $.evolve({ dialog: "export", dialogError: null, copied: false }),
+    RequestedCloseDialog: ($) => $.evolve({ dialog: null }),
+    // `close` also follows the editor's own close, and one dialog closing as
+    // another opens in its place, so it only counts for the dialog still open.
+    ClosedDialog: ($, { dialog }) => $.model.dialog === dialog ? $.evolve({ dialog: null }) : $.model,
+    UpdatedImportText: ($, { value }) => $.evolve({ importText: value, dialogError: null }),
+    SubmittedImport: submittedImport,
     ChoseImportFiles: choseImportFiles,
-    SucceededReadImport: ($, { invoice }) => ({ ...replaced($.model, invoice), notice: null }),
+    SucceededReadImport: ($, { invoice }) => ({
+      ...replaced($.model, invoice),
+      notice: null,
+      demo: null,
+      dialog: null,
+      importText: "",
+      dialogError: null
+    }),
     FailedReadImport: ($, { name, reason }) =>
-      $.evolve({ notice: `${name} isn't an invoice this app can open. ${reason}` }),
+      $.evolve({ dialogError: `${name} isn't an invoice this app can open. ${reason}` }),
+    RejectedImportFiles: ($) => $.evolve({ dialogError: "Drop a single .json file." }),
+    ClickedCopyExport: clickedCopyExport,
+    SucceededCopyExport: ($) => $.evolve({ copied: true, dialogError: null }),
+    FailedCopyExport: ($) =>
+      $.evolve({
+        copied: false,
+        dialogError: "The browser didn't allow copying. Select the text and copy it instead."
+      }),
+    ClickedDownloadExport: ($) => $.run(ExportJson.make({ invoice: $.model.invoice })),
     RequestedSave: requestedSave,
     SucceededSaveInvoice: ($, { edits }) => $.evolve({ savedEdits: edits }),
     FailedSaveInvoice: ($, { reason }) =>
@@ -1111,7 +1597,8 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
       "keydown",
       ({ key }) => key === "Escape" ? InvoiceEditorMessage.PressedEscape() : undefined
     ),
-    model.edits !== model.savedEdits &&
+    // Sample data is never saved, so the user's own invoice is still in storage after a reload.
+    model.demo === null && model.edits !== model.savedEdits &&
     Subscription.make(
       "autosave",
       model.edits,
@@ -1119,47 +1606,58 @@ export const InvoiceEditorNoDeps = InvoiceEditorDef.make({
     )
   ],
   view: (h, model) =>
-    h.div.class("flex flex-col lg:h-dvh lg:flex-row").children(
-      h.main
-        .class(
-          "flex w-full shrink-0 flex-col gap-14 border-line px-6 py-10 lg:h-dvh lg:w-[520px] lg:overflow-y-auto lg:border-r lg:px-12"
-        )
-        .children(
-          h.header.class("flex flex-col gap-1").children(
-            h.h1.class("text-[15px] font-semibold tracking-tight text-primary").children("Invoice"),
-            h.p.class("text-[13px] text-muted-foreground").attr("role", "status").children(
-              model.edits === model.savedEdits ? "Saved in this browser" : "Saving…"
+    // On a small screen the page leaves room at the bottom for the command bar.
+    h.div.class("flex flex-col max-lg:pb-24 lg:h-dvh").children(
+      DemoBanner(h, model),
+      h.div.class("flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row").children(
+        h.main
+          .class(
+            "flex w-full shrink-0 flex-col gap-14 border-line px-6 py-10 lg:h-full lg:w-[520px] lg:overflow-y-auto lg:border-r lg:px-12"
+          )
+          .children(
+            h.header.class("flex flex-col gap-1").children(
+              h.h1.class("text-[15px] font-semibold tracking-tight text-primary").children("Invoice"),
+              h.p.class("text-[13px] text-muted-foreground").attr("role", "status").children(
+                model.demo !== null
+                  ? "Demo mode: nothing is saved"
+                  : model.edits === model.savedEdits
+                  ? "Saved in this browser"
+                  : "Saving…"
+              )
+            ),
+            model.notice !== null &&
+              h.div
+                .class(
+                  "-my-6 flex items-start justify-between gap-4 rounded-xl border border-danger/30 px-4 py-3 text-[13px] text-danger"
+                )
+                .attr("role", "alert")
+                .children(
+                  h.span(model.notice),
+                  h.button
+                    .attr("type", "button")
+                    .class("shrink-0 cursor-pointer font-medium underline-offset-4 hover:underline")
+                    .on("click", InvoiceEditorMessage.ClickedDismissNotice())
+                    .children("Dismiss")
+                ),
+            Details(h, model),
+            PartyFields(h, "From", "from", model.invoice.from, FROM_EXAMPLE),
+            PartyFields(h, "Bill to", "billTo", model.invoice.billTo, BILL_TO_EXAMPLE),
+            LineItems(h, model),
+            PaymentFields(h, model),
+            Section(h, "Notes").children(
+              TextArea(h, {
+                label: "Notes",
+                value: model.invoice.notes,
+                placeholder: "Thank you for your business.",
+                updated: (value) => InvoiceEditorMessage.UpdatedText({ field: "notes", value })
+              })
             )
           ),
-          model.notice !== null &&
-            h.div
-              .class(
-                "-my-6 flex items-start justify-between gap-4 rounded-xl border border-danger/30 px-4 py-3 text-[13px] text-danger"
-              )
-              .attr("role", "alert")
-              .children(
-                h.span(model.notice),
-                h.button
-                  .attr("type", "button")
-                  .class("shrink-0 cursor-pointer font-medium underline-offset-4 hover:underline")
-                  .on("click", InvoiceEditorMessage.ClickedDismissNotice())
-                  .children("Dismiss")
-              ),
-          Details(h, model),
-          PartyFields(h, "From", "from", model.invoice.from, FROM_EXAMPLE),
-          PartyFields(h, "Bill to", "billTo", model.invoice.billTo, BILL_TO_EXAMPLE),
-          LineItems(h, model),
-          PaymentFields(h, model),
-          Section(h, "Notes").children(
-            TextArea(h, {
-              label: "Notes",
-              value: model.invoice.notes,
-              placeholder: "Thank you for your business.",
-              updated: (value) => InvoiceEditorMessage.UpdatedText({ field: "notes", value })
-            })
-          )
-        ),
-      PreviewPane(h, model)
+        PreviewPane(h, model)
+      ),
+      CommandDock(h, model),
+      ImportDialog(h, model),
+      ExportDialog(h, model)
     )
 })
 

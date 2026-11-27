@@ -13,6 +13,17 @@
   --color-danger: #c13515;
 }
 
+/* The "Preview" link on a small screen glides to the preview. */
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 ::selection {
   @apply bg-primary/10;
 }
@@ -110,5 +121,31 @@ input[list]::-webkit-calendar-picker-indicator {
 
   &::-webkit-scrollbar {
     display: none;
+  }
+}
+
+/*
+ * The thumb of a segmented control: a dark copy of the labels, clipped to the
+ * pressed segment. `TrackThumb` measures that segment and sets the two insets.
+ * Until it has, the pressed segment is painted dark itself and the thumb is
+ * hidden, so the control looks the same before and after the first measure.
+ */
+.segmented-thumb {
+  clip-path: inset(0 var(--thumb-end, 100%) 0 var(--thumb-start, 0px) round 999px);
+  transition: clip-path 200ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+.segmented:not([data-tracking]) .segmented-thumb {
+  visibility: hidden;
+}
+
+.segmented:not([data-tracking]) [aria-pressed="true"] {
+  background-color: var(--color-primary);
+  color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segmented-thumb {
+    transition: none;
   }
 }

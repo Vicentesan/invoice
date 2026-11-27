@@ -1,5 +1,5 @@
 import { UiSchema } from "@effect/ui"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import * as IsoDate from "./IsoDate.ts"
 import * as Money from "./Money.ts"
 
@@ -94,6 +94,10 @@ const invalid = (error: Schema.SchemaError) => new InvalidInvoice({ reason: erro
 /** Decodes and validates JSON text with the invoice Schema. */
 export const fromJson = (json: string): Effect.Effect<Invoice, InvalidInvoice> =>
   Schema.decodeUnknownEffect(InvoiceFromJson)(json).pipe(Effect.mapError(invalid))
+
+/** The invoice as indented JSON text, for showing it. `None` only for a value the Schema rejects. */
+export const toJsonText = (invoice: Invoice): Option.Option<string> =>
+  Schema.encodeOption(Invoice)(invoice).pipe(Option.map((encoded) => JSON.stringify(encoded, null, 2)))
 
 /** Encodes with the invoice Schema into indented JSON text. */
 export const toJson = (invoice: Invoice): Effect.Effect<string, InvalidInvoice> =>

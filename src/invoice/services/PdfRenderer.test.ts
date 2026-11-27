@@ -1,5 +1,6 @@
 import * as Invoice from "#domain/Invoice"
 import * as Money from "#domain/Money"
+import * as SampleInvoice from "#domain/SampleInvoice"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { readFile } from "node:fs/promises"
@@ -159,6 +160,18 @@ describe("PdfRenderer", () => {
       expect(pages.length).toBeGreaterThan(1)
       expect(pages.join("\n")).toContain("Line 80")
       expect(pages.at(-1)).toContain(`Page ${pages.length} of ${pages.length}`)
+    }).pipe(Effect.provide(layer)))
+
+  it.effect("renders every sample invoice", () =>
+    Effect.gen(function*() {
+      const renderer = yield* PdfRenderer
+
+      for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+        const sample = SampleInvoice.make("2026-11-27", seed)
+        const [text = ""] = yield* extractText(yield* renderer.render(sample))
+
+        expect(text.split("\n")).toContain(sample.number)
+      }
     }).pipe(Effect.provide(layer)))
 
   it.effect("fails with the characters Inter can't draw", () =>

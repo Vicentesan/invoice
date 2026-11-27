@@ -27,11 +27,14 @@ browser's `localStorage` and never leaves the page.
 - **A4 or US Letter.**
 - **Download** as `invoice-<number>.pdf`.
 - **Autosave** to `localStorage`, shortly after you stop typing.
-- **Import and export** the invoice as JSON. An imported file is validated before it replaces anything.
+- **Import and export** the invoice as JSON. Export shows the JSON to copy or save as a file; import takes pasted
+  JSON or a file. What is imported is validated before it replaces anything.
 - **Duplicate for next month.** Adds one to the invoice number (keeping its zero padding), moves the issue date one
   calendar month on, and keeps everything else. Dates clamp to the end of the month: 31 January becomes 28 or 29
   February, 30 November becomes 30 December. A preset due date follows the new issue date; a custom one moves a month
   too. The duplicate replaces the invoice on screen, so download or export the current one first.
+- **Sample data.** One button fills the form with a made-up invoice and puts the app in demo mode, marked by a
+  banner. Nothing is saved while it is on, and pressing the button again brings your own invoice back.
 
 ## The PDF
 

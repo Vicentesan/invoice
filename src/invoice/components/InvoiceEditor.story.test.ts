@@ -1,8 +1,20 @@
 import * as Invoice from "#domain/Invoice"
+import * as SampleInvoice from "#domain/SampleInvoice"
+import { Component } from "@effect/ui"
 import { Story } from "@effect/ui/testing"
 import { describe, expect, it } from "@effect/vitest"
-import { DateTime, Effect } from "effect"
-import { DownloadPdf, InvoiceEditorMessage, InvoiceEditorNoDeps, ReadImport, SaveInvoice } from "./InvoiceEditor.ts"
+import { DateTime, Effect, Option } from "effect"
+import {
+  CopyExport,
+  DownloadPdf,
+  DrawSeed,
+  ExportJson,
+  InvoiceEditorMessage,
+  InvoiceEditorNoDeps,
+  ParseImport,
+  ReadImport,
+  SaveInvoice
+} from "./InvoiceEditor.ts"
 
 const initialInvoice: Invoice.Invoice = {
   ...Invoice.empty("2026-01-31"),
@@ -146,22 +158,88 @@ describe("InvoiceEditor", () => {
       expect(s.model.invoice.items.map((item) => item.description)).toEqual(["Hosting", "Support"])
     }))
 
-  it.effect("imports a JSON file through the Schema and reports one it can't read", () =>
+  it.effect("imports pasted JSON through the Schema and reports text it can't read", () =>
+    Effect.gen(function*() {
+      const s = yield* Story.make(InvoiceEditorNoDeps, props)
+      const imported = { ...initialInvoice, number: "INV-0100" }
+
+      s.send(InvoiceEditorMessage.ClickedImportJson())
+        .send(InvoiceEditorMessage.UpdatedImportText({ value: "{}" }))
+        .send(InvoiceEditorMessage.SubmittedImport())
+        .expectExact(ParseImport.make({ json: "{}" }))
+        .resolve(ParseImport, InvoiceEditorMessage.FailedReadImport({ name: "The pasted text", reason: "Missing key" }))
+      expect(s.model.dialog).toBe("import")
+      expect(s.model.dialogError).toBe("The pasted text isn't an invoice this app can open. Missing key")
+      expect(s.model.invoice).toEqual(initialInvoice)
+
+      // Typing again clears the error; a valid invoice replaces the one on screen and closes the dialog.
+      s.send(InvoiceEditorMessage.UpdatedImportText({ value: "{…}" }))
+      expect(s.model.dialogError).toBeNull()
+
+      s.send(InvoiceEditorMessage.SubmittedImport())
+        .resolve(ParseImport, InvoiceEditorMessage.SucceededReadImport({ invoice: imported }))
+      expect(s.model.invoice).toEqual(imported)
+      expect(s.model.dialog).toBeNull()
+      expect(s.model.importText).toBe("")
+    }))
+
+  it.effect("imports a JSON file chosen in the dialog", () =>
     Effect.gen(function*() {
       const s = yield* Story.make(InvoiceEditorNoDeps, props)
       const file = new File(["{}"], "broken.json", { type: "application/json" })
-      const imported = { ...initialInvoice, number: "INV-0100" }
 
-      s.send(InvoiceEditorMessage.ChoseImportFiles({ files: [file] }))
+      s.send(InvoiceEditorMessage.ClickedImportJson())
+        .send(InvoiceEditorMessage.ChoseImportFiles({ files: [file] }))
         .expectExact(ReadImport.make({ file }))
         .resolve(ReadImport, InvoiceEditorMessage.FailedReadImport({ name: "broken.json", reason: "Missing key" }))
-      expect(s.model.notice).toBe("broken.json isn't an invoice this app can open. Missing key")
-      expect(s.model.invoice).toEqual(initialInvoice)
+      expect(s.model.dialogError).toBe("broken.json isn't an invoice this app can open. Missing key")
+    }))
 
-      s.send(InvoiceEditorMessage.ChoseImportFiles({ files: [file] }))
-        .resolve(ReadImport, InvoiceEditorMessage.SucceededReadImport({ invoice: imported }))
-      expect(s.model.invoice).toEqual(imported)
-      expect(s.model.notice).toBeNull()
+  it.effect("shows the invoice as JSON to copy or save to a file", () =>
+    Effect.gen(function*() {
+      const s = yield* Story.make(InvoiceEditorNoDeps, props)
+      const json = Option.getOrThrow(Invoice.toJsonText(initialInvoice))
+
+      s.send(InvoiceEditorMessage.ClickedExportJson())
+      expect(s.model.dialog).toBe("export")
+
+      s.send(InvoiceEditorMessage.ClickedCopyExport())
+        .expectExact(CopyExport.make({ json }))
+        .resolve(CopyExport, InvoiceEditorMessage.SucceededCopyExport())
+      expect(s.model.copied).toBe(true)
+
+      s.send(InvoiceEditorMessage.ClickedDownloadExport()).expectExact(ExportJson.make({ invoice: initialInvoice }))
+        .resolve(ExportJson, Component.noop)
+      s.send(InvoiceEditorMessage.RequestedCloseDialog())
+      expect(s.model.dialog).toBeNull()
+    }))
+
+  it.effect("fills in sample data in a demo mode that saves nothing and gives the invoice back", () =>
+    Effect.gen(function*() {
+      const s = yield* Story.make(InvoiceEditorNoDeps, props)
+
+      s.send(InvoiceEditorMessage.ClickedSampleData())
+        .expectExact(DrawSeed.make())
+        .resolve(DrawSeed, InvoiceEditorMessage.CompletedDrawSeed({ seed: 7 }))
+      expect(s.model.invoice).toEqual(SampleInvoice.make("2026-02-10", 7))
+      expect(s.model.demo).toEqual({ own: initialInvoice })
+      // Edits in demo mode never reach storage.
+      s.send(InvoiceEditorMessage.UpdatedText({ field: "notes", value: "Just trying it" }))
+      expect(s.subscriptions).toEqual([])
+
+      // Pressing the button again leaves demo mode and puts the invoice back.
+      s.send(InvoiceEditorMessage.ClickedSampleData())
+      expect(s.model.invoice).toEqual(initialInvoice)
+      expect(s.model.demo).toBeNull()
+
+      // The banner's link does the same.
+      s.send(InvoiceEditorMessage.ClickedSampleData())
+        .resolve(DrawSeed, InvoiceEditorMessage.CompletedDrawSeed({ seed: 8 }))
+      expect(s.model.demo).toEqual({ own: initialInvoice })
+
+      s.send(InvoiceEditorMessage.ClickedExitDemo())
+      expect(s.model.invoice).toEqual(initialInvoice)
+      expect(s.model.demo).toBeNull()
     }))
 
   it.effect("downloads the PDF of the invoice as it stands", () =>
